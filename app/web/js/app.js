@@ -76,7 +76,8 @@ function filterAndRender() {
     const sortVal = document.getElementById("sortSelect").value;
 
     filteredTargets = allTargets.filter(t => {
-        const matchesSearch = t.name.toLowerCase().includes(search) || t.address.toLowerCase().includes(search);
+        const formattedTitle = formatTraderName(t).title.toLowerCase();
+        const matchesSearch = t.name.toLowerCase().includes(search) || t.address.toLowerCase().includes(search) || formattedTitle.includes(search);
         const matchesGem = !showGemsOnly || t.is_hidden_gem;
         return matchesSearch && matchesGem;
     });
