@@ -25,6 +25,7 @@ from server.serve_web_app import start_server, PORT
 
 def main():
     force_rescan = "--rescan" in sys.argv
+    skip_scan = "--serve-only" in sys.argv or "--no-scan" in sys.argv
     test_mode = "--test" in sys.argv
 
     print("==========================================================")
@@ -32,7 +33,9 @@ def main():
     print("==========================================================")
 
     # Step 1: Ensure dataset exists or run pipeline
-    if force_rescan or not os.path.exists(VERIFIED_DATA_FILE):
+    if skip_scan:
+        print("\n[PIPELINE] Serve-only mode requested. Skipping wallet scan pipeline.")
+    elif force_rescan or not os.path.exists(VERIFIED_DATA_FILE):
         print("\n[PIPELINE] Dataset missing or rescan requested. Running pipeline...")
         fetch_and_scrape_leaderboard(min_score=60.0)
         run_phase2_filter()

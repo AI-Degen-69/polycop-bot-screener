@@ -27,7 +27,14 @@ python screen.py
 ```
 This automatically starts an HTTP server at `http://localhost:8080` and opens the interactive dashboard in your default browser.
 
-### 3. Force Rescan & Re-screen
+### 3. Serve Only (Skip Scan Pipeline)
+To launch the dashboard directly without running any scan:
+
+```bash
+python screen.py --serve-only
+```
+
+### 4. Force Rescan & Re-screen
 To pull fresh leaderboard data and re-evaluate all candidates:
 
 ```bash
