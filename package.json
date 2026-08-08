@@ -1,0 +1,21 @@
+{
+  "name": "polycop-bot-screener",
+  "version": "1.0.0",
+  "description": "Automated Polymarket trader wallet screener and 100-point audit engine",
+  "main": "screen.py",
+  "scripts": {
+    "dev": "python screen.py --serve-only",
+    "start": "python screen.py",
+    "rescan": "python screen.py --rescan",
+    "test": "python -m unittest discover tests"
+  },
+  "keywords": [
+    "polymarket",
+    "polycop",
+    "copy-trading",
+    "screener",
+    "trading-bot"
+  ],
+  "author": "AI-Degen-69",
+  "license": "MIT"
+}

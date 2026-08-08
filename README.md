@@ -24,6 +24,8 @@ To start the local web application with the pre-cached target dataset:
 
 ```bash
 python screen.py
+# or using npm / pnpm:
+npm start
 ```
 This automatically starts an HTTP server at `http://localhost:8080` and opens the interactive dashboard in your default browser.
 
@@ -32,6 +34,9 @@ To launch the dashboard directly without running any scan:
 
 ```bash
 python screen.py --serve-only
+# or using npm / pnpm:
+npm run dev
+# pnpm dev
 ```
 
 ### 4. Force Rescan & Re-screen
@@ -39,6 +44,8 @@ To pull fresh leaderboard data and re-evaluate all candidates:
 
 ```bash
 python screen.py --rescan
+# or using npm / pnpm:
+npm run rescan
 ```
 
 ---
