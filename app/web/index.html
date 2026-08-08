@@ -30,7 +30,7 @@
                     <div class="val" id="statSTier">0</div>
                     <div class="lbl">S-Tier (≥90)</div>
                 </div>
-                <div class="stat-pill">
+                <div class="stat-pill stat-pill-gem">
                     <div class="val" id="statGems">0</div>
                     <div class="lbl">Hidden Gems</div>
                 </div>
@@ -46,14 +46,16 @@
                 <option value="wr-desc">Sort by: Highest Win Rate</option>
                 <option value="polycop-desc">Sort by: Highest PolyCop Site Score</option>
             </select>
-            <button id="btnToggleGem" class="btn-toggle-gem">💎 Hidden Gems Only</button>
-            <div class="gem-info-bubble-wrapper">
-                <div class="gem-info-bubble">ℹ️</div>
-                <div class="gem-info-card">
-                    <strong>💎 How Hidden Gems Are Identified:</strong><br>
-                    Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
-                </div>
-            </div>
+            <button id="btnToggleGem" class="btn-toggle-gem">
+                <span class="btn-label">💎 Hidden Gems Only</span>
+                <span class="gem-info-bubble-wrapper">
+                    <span class="gem-info-bubble">ℹ️</span>
+                    <span class="gem-info-card">
+                        <strong>💎 How Hidden Gems Are Identified:</strong><br>
+                        Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
+                    </span>
+                </span>
+            </button>
             <button id="btnStartScan" class="btn-scan">⚡ Scan Leaderboard API</button>
             <button id="btnClearData" class="btn-clear-data">🗑️ Clear Data</button>
         </div>

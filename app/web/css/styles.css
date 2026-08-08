@@ -24,7 +24,7 @@ body {
     min-height: 100vh;
 }
 
-.container { max-width: 1400px; margin: 0 auto; }
+.container { max-width: 1750px; width: 95vw; margin: 0 auto; }
 
 header {
     display: flex; justify-content: space-between; align-items: center;
@@ -32,37 +32,38 @@ header {
 }
 
 .header-title h1 {
-    font-size: 1.8rem; font-weight: 700;
+    font-size: 2.2rem; font-weight: 800;
     background: linear-gradient(to right, var(--accent-cyan), var(--accent-purple));
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 
-.header-title p { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
+.header-title p { color: var(--text-muted); font-size: 1.05rem; margin-top: 0.35rem; }
 
-.header-stats { display: flex; gap: 1rem; }
+.header-stats { display: flex; gap: 1.25rem; }
 
 .stat-pill {
     background: var(--bg-card); border: 1px solid var(--border-color);
-    padding: 0.5rem 1rem; border-radius: 8px; text-align: center;
+    padding: 0.75rem 1.4rem; border-radius: 12px; text-align: center;
+    min-width: 140px; transition: all 0.3s ease;
 }
 
-.stat-pill .val { font-size: 1.1rem; font-weight: 700; color: var(--accent-cyan); }
-.stat-pill .lbl { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
+.stat-pill .val { font-size: 1.5rem; font-weight: 800; color: var(--accent-cyan); }
+.stat-pill .lbl { font-size: 0.82rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; margin-top: 0.15rem; }
 
-.search-bar { display: flex; gap: 1rem; margin-bottom: 2rem; }
+.search-bar { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
 
 .search-input {
-    flex: 1; background: var(--bg-card); border: 1px solid var(--border-color);
-    color: var(--text-main); padding: 0.75rem 1.25rem; border-radius: 10px;
-    font-family: 'Outfit', sans-serif; font-size: 0.95rem; outline: none; transition: all 0.25s ease;
+    flex: 1; min-width: 280px; background: var(--bg-card); border: 1px solid var(--border-color);
+    color: var(--text-main); padding: 0.85rem 1.4rem; border-radius: 12px;
+    font-family: 'Outfit', sans-serif; font-size: 1.05rem; outline: none; transition: all 0.25s ease;
 }
 
 .search-input:focus { border-color: var(--accent-cyan); box-shadow: 0 0 15px rgba(6, 182, 212, 0.2); }
 
 .sort-select {
     background: var(--bg-card); border: 1px solid var(--border-color);
-    color: var(--text-main); padding: 0.75rem 1rem; border-radius: 10px;
-    font-family: 'Outfit', sans-serif; font-size: 0.92rem; font-weight: 600; cursor: pointer; outline: none;
+    color: var(--text-main); padding: 0.85rem 1.25rem; border-radius: 12px;
+    font-family: 'Outfit', sans-serif; font-size: 1rem; font-weight: 600; cursor: pointer; outline: none;
     transition: all 0.25s ease;
 }
 
@@ -70,75 +71,81 @@ header {
 
 .btn-toggle-gem {
     background: var(--bg-card); border: 1px solid var(--border-color);
-    color: var(--text-muted); padding: 0.75rem 1.2rem; border-radius: 10px;
-    font-family: 'Outfit', sans-serif; font-size: 0.92rem; font-weight: 700; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 0.4rem; transition: all 0.25s ease;
+    color: var(--text-muted); padding: 0.85rem 1.3rem; border-radius: 12px;
+    font-family: 'Outfit', sans-serif; font-size: 1rem; font-weight: 700; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 0.6rem; transition: all 0.25s ease;
+    position: relative; overflow: visible;
 }
 
-.btn-toggle-gem:hover { border-color: var(--accent-purple); color: #ffffff; }
-
-.btn-toggle-gem.active {
-    background: rgba(139, 92, 246, 0.25); border-color: var(--accent-purple);
-    color: #ffffff; box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
-}
+.btn-toggle-gem:hover { border-color: #c084fc; color: #ffffff; }
 
 .badge-gem {
     background: linear-gradient(135deg, rgba(168, 85, 247, 0.3), rgba(236, 72, 153, 0.3));
-    border: 1px solid #d8b4fe; color: #f0abfc; font-size: 0.72rem; font-weight: 700;
-    padding: 0.2rem 0.5rem; border-radius: 6px; display: inline-flex; align-items: center;
-    gap: 0.2rem; margin-left: 0.4rem; cursor: help; box-shadow: 0 0 10px rgba(168, 85, 247, 0.4); transition: all 0.25s ease;
+    border: 1px solid #d8b4fe; color: #f0abfc; font-size: 0.78rem; font-weight: 700;
+    padding: 0.25rem 0.6rem; border-radius: 6px; display: inline-flex; align-items: center;
+    gap: 0.25rem; margin-left: 0.4rem; cursor: help; box-shadow: 0 0 10px rgba(168, 85, 247, 0.4); transition: all 0.25s ease;
 }
 
 .badge-gem:hover { transform: scale(1.05); border-color: #f0abfc; box-shadow: 0 0 16px rgba(236, 72, 153, 0.6); }
 
-/* --- SPARKLY GEM CARDS & MODAL ANIMATIONS --- */
-@keyframes gemSparkleBorder {
+/* --- SPARKLING DIAMOND BORDER ANIMATIONS --- */
+@keyframes diamondSparkleBorder {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
 }
 
-@keyframes gemSparkleSweep {
-    0% { transform: translateX(-150%) skewX(-25deg); opacity: 0; }
-    50% { opacity: 0.6; }
-    100% { transform: translateX(250%) skewX(-25deg); opacity: 0; }
+@keyframes diamondSoftGlow {
+    0%, 100% {
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.35), 0 0 20px rgba(232, 121, 249, 0.25);
+    }
+    50% {
+        box-shadow: 0 0 24px rgba(56, 189, 248, 0.6), 0 0 35px rgba(232, 121, 249, 0.45), 0 0 10px rgba(255, 255, 255, 0.7);
+    }
 }
 
-@keyframes gemPulseGlow {
-    0%, 100% { box-shadow: 0 0 20px rgba(168, 85, 247, 0.4), inset 0 0 15px rgba(236, 72, 153, 0.2); }
-    50% { box-shadow: 0 0 35px rgba(236, 72, 153, 0.65), inset 0 0 25px rgba(168, 85, 247, 0.35); }
-}
-
-.wallet-card.card-gem {
-    position: relative; border: 2px solid transparent !important;
-    background: linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
-                linear-gradient(135deg, #a855f7, #ec4899, #3b82f6, #8b5cf6, #a855f7) border-box !important;
-    background-size: 300% 300% !important;
-    animation: gemSparkleBorder 4s ease infinite, gemPulseGlow 3s ease-in-out infinite !important;
-    overflow: hidden;
-}
-
-.wallet-card.card-gem::before {
-    content: ""; position: absolute; top: 0; left: 0; width: 45%; height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-    animation: gemSparkleSweep 5s cubic-bezier(0.4, 0, 0.2, 1) infinite; pointer-events: none; z-index: 2;
-}
-
+/* 1. HIDDEN GEMS WALLET CARD & MODAL (Border Only - Inside Untouched) */
+.wallet-card.card-gem,
 .modal-container.modal-gem {
+    position: relative;
     border: 2px solid transparent !important;
     background: linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
-                linear-gradient(135deg, #a855f7, #ec4899, #3b82f6, #8b5cf6, #a855f7) border-box !important;
+                linear-gradient(135deg, #7dd3fc, #c084fc, #ffffff, #e879f9, #38bdf8, #7dd3fc) border-box !important;
     background-size: 300% 300% !important;
-    animation: gemSparkleBorder 4s ease infinite, gemPulseGlow 3s ease-in-out infinite !important;
+    animation: diamondSparkleBorder 5s ease infinite, diamondSoftGlow 3.5s ease-in-out infinite !important;
+}
+
+/* 2. HIDDEN GEMS FILTER BUTTON ACTIVE STATE */
+.btn-toggle-gem.active {
+    border: 2px solid transparent !important;
+    background: linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+                linear-gradient(135deg, #7dd3fc, #c084fc, #ffffff, #e879f9, #38bdf8, #7dd3fc) border-box !important;
+    background-size: 300% 300% !important;
+    animation: diamondSparkleBorder 5s ease infinite, diamondSoftGlow 3.5s ease-in-out infinite !important;
+    color: #ffffff;
+}
+
+/* 3. HIDDEN GEMS COUNTER STAT PILL */
+.stat-pill-gem {
+    border: 2px solid transparent !important;
+    background: linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+                linear-gradient(135deg, #7dd3fc, #c084fc, #ffffff, #e879f9, #38bdf8, #7dd3fc) border-box !important;
+    background-size: 300% 300% !important;
+    animation: diamondSparkleBorder 5s ease infinite, diamondSoftGlow 3.5s ease-in-out infinite !important;
+}
+
+.stat-pill-gem .val {
+    color: #f0abfc !important;
+    text-shadow: 0 0 10px rgba(240, 171, 252, 0.6);
 }
 
 .badge-gem-wrapper { position: relative; display: inline-block; }
 
 .gem-tooltip-text {
-    visibility: hidden; width: 290px; background: #1e1b4b; color: #f3e8ff; text-align: left;
-    border-radius: 12px; padding: 0.85rem 1rem; position: absolute; z-index: 100;
-    bottom: 125%; left: 50%; margin-left: -145px; opacity: 0; transform: translateY(8px);
-    transition: opacity 0.25s ease, transform 0.25s ease; font-size: 0.8rem; font-weight: 400; line-height: 1.45;
+    visibility: hidden; width: 300px; background: #1e1b4b; color: #f3e8ff; text-align: left;
+    border-radius: 12px; padding: 0.9rem 1.1rem; position: absolute; z-index: 100;
+    bottom: 125%; left: 50%; margin-left: -150px; opacity: 0; transform: translateY(8px);
+    transition: opacity 0.25s ease, transform 0.25s ease; font-size: 0.85rem; font-weight: 400; line-height: 1.45;
     border: 1px solid #c084fc; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.9), 0 0 20px rgba(168, 85, 247, 0.3);
     pointer-events: none;
 }
@@ -150,26 +157,26 @@ header {
 
 .badge-gem-wrapper:hover .gem-tooltip-text { visibility: visible; opacity: 1; transform: translateY(0); }
 
-.gem-info-bubble-wrapper { position: relative; display: inline-flex; align-items: center; gap: 0.4rem; }
+.gem-info-bubble-wrapper { position: relative; display: inline-flex; align-items: center; margin-left: 0.2rem; }
 
 .gem-info-bubble {
-    background: rgba(139, 92, 246, 0.2); border: 1px solid var(--accent-purple); color: #d8b4fe;
-    width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(139, 92, 246, 0.25); border: 1px solid var(--accent-purple); color: #d8b4fe;
+    width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
     font-size: 0.82rem; font-weight: 700; cursor: help; transition: all 0.25s ease;
 }
 
-.gem-info-bubble:hover { background: rgba(139, 92, 246, 0.4); border-color: #f0abfc; transform: scale(1.1); box-shadow: 0 0 12px rgba(168, 85, 247, 0.6); }
+.gem-info-bubble:hover { background: rgba(139, 92, 246, 0.5); border-color: #f0abfc; transform: scale(1.1); box-shadow: 0 0 12px rgba(168, 85, 247, 0.6); }
 
 .gem-info-card {
-    visibility: hidden; width: 320px; background: #0f172a; color: #f1f5f9; border-radius: 14px;
-    padding: 1rem 1.15rem; position: absolute; z-index: 120; top: 135%; right: 0; opacity: 0;
-    transform: translateY(-8px); transition: opacity 0.25s ease, transform 0.25s ease; font-size: 0.82rem;
+    visibility: hidden; width: 340px; background: #0f172a; color: #f1f5f9; border-radius: 14px;
+    padding: 1.1rem 1.25rem; position: absolute; z-index: 120; top: 140%; left: 50%;
+    transform: translateX(-50%) translateY(-8px); transition: opacity 0.25s ease, transform 0.25s ease; font-size: 0.88rem;
     line-height: 1.5; border: 1px solid #a855f7; box-shadow: 0 16px 45px rgba(0, 0, 0, 0.9), 0 0 25px rgba(168, 85, 247, 0.4);
-    pointer-events: none;
+    pointer-events: none; text-align: left; font-weight: 400;
 }
 
 .gem-info-card::before {
-    content: ""; position: absolute; bottom: 100%; right: 12px; border-width: 7px; border-style: solid;
+    content: ""; position: absolute; bottom: 100%; left: 50%; margin-left: -7px; border-width: 7px; border-style: solid;
     border-color: transparent transparent #a855f7 transparent;
 }
 
@@ -177,7 +184,7 @@ header {
 
 .btn-scan {
     background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%); color: #ffffff;
-    font-family: 'Outfit', sans-serif; font-size: 0.92rem; font-weight: 700; padding: 0.75rem 1.4rem;
+    font-family: 'Outfit', sans-serif; font-size: 1.02rem; font-weight: 700; padding: 0.85rem 1.6rem;
     border-radius: 12px; border: none; cursor: pointer; display: inline-flex; align-items: center;
     gap: 0.5rem; box-shadow: 0 0 20px rgba(6, 182, 212, 0.35); transition: all 0.25s ease;
 }
@@ -186,34 +193,34 @@ header {
 
 .btn-clear-data {
     background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5;
-    font-family: 'Outfit', sans-serif; font-size: 0.88rem; font-weight: 700; padding: 0.75rem 1.2rem;
+    font-family: 'Outfit', sans-serif; font-size: 0.98rem; font-weight: 700; padding: 0.85rem 1.4rem;
     border-radius: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem; transition: all 0.25s ease;
 }
 
 .btn-clear-data:hover { background: rgba(239, 68, 68, 0.3); color: #ffffff; box-shadow: 0 0 16px rgba(239, 68, 68, 0.4); }
 
-.wallets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
+.wallets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1.75rem; }
 
 .wallet-card {
-    background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 14px;
-    padding: 1.25rem; cursor: pointer; transition: all 0.25s ease; position: relative;
+    background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px;
+    padding: 1.5rem; cursor: pointer; transition: all 0.25s ease; position: relative;
 }
 
-.wallet-card:hover { transform: translateY(-4px); border-color: var(--accent-cyan); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5); }
+.wallet-card:hover { transform: translateY(-4px); border-color: var(--accent-cyan); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6); }
 
-.wallet-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
-.wallet-card-name { font-size: 1.1rem; font-weight: 700; }
-.wallet-card-addr { font-family: 'Space Mono', monospace; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }
+.wallet-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.15rem; }
+.wallet-card-name { font-size: 1.25rem; font-weight: 700; color: var(--text-main); }
+.wallet-card-addr { font-family: 'Space Mono', monospace; font-size: 0.88rem; color: var(--text-muted); margin-top: 0.25rem; }
 
 .score-badge {
     background: rgba(6, 182, 212, 0.15); border: 1px solid var(--accent-cyan); color: var(--accent-cyan);
-    font-size: 0.85rem; font-weight: 700; padding: 0.25rem 0.6rem; border-radius: 6px;
+    font-size: 0.95rem; font-weight: 800; padding: 0.35rem 0.75rem; border-radius: 8px;
 }
 
-.card-metrics-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; background: rgba(0, 0, 0, 0.2); padding: 0.75rem; border-radius: 8px; }
-.summary-cell { font-size: 0.82rem; }
-.summary-lbl { color: var(--text-muted); display: block; font-size: 0.72rem; }
-.summary-val { font-weight: 700; font-family: 'Space Mono', monospace; color: var(--text-main); }
+.card-metrics-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem 1.2rem; background: rgba(0, 0, 0, 0.25); padding: 0.95rem 1.1rem; border-radius: 12px; }
+.summary-cell { font-size: 0.9rem; }
+.summary-lbl { color: var(--text-muted); display: block; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.15rem; }
+.summary-val { font-weight: 700; font-family: 'Space Mono', monospace; color: var(--text-main); font-size: 1.08rem; }
 
 /* --- MODAL DIALOG STYLES --- */
 .modal-overlay {

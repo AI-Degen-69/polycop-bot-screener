@@ -31,6 +31,8 @@ async function loadDataset() {
         filterAndRender();
     } catch (e) {
         console.warn("Could not load /data/phase2_verified_targets.json:", e);
+        allTargets = [];
+        updateSummaryHeader({});
         document.getElementById("walletsGrid").innerHTML = `
             <div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: #9ca3af;">
                 <h3>⚠️ No Cached Scan Data Found</h3>
@@ -40,22 +42,31 @@ async function loadDataset() {
     }
 }
 
-function updateSummaryHeader(data) {
-    document.getElementById("statTotalScanned").innerText = data.total_scraped_profiles || 0;
-    document.getElementById("statVerified").innerText = data.total_verified_targets || allTargets.length;
-    document.getElementById("statSTier").innerText = data.s_tier_count || allTargets.filter(t => t.final_score >= 90).length;
-    document.getElementById("statGems").innerText = data.hidden_gems_count || allTargets.filter(t => t.is_hidden_gem).length;
+function updateSummaryHeader(data = {}) {
+    const totalScanned = data.total_scraped_profiles ?? (allTargets.length > 0 ? allTargets.length : 0);
+    const totalVerified = data.total_verified_targets ?? allTargets.length;
+    const sTierCount = data.s_tier_count ?? allTargets.filter(t => t.final_score >= 90).length;
+    const gemsCount = data.hidden_gems_count ?? allTargets.filter(t => t.is_hidden_gem).length;
+
+    document.getElementById("statTotalScanned").innerText = totalScanned;
+    document.getElementById("statVerified").innerText = totalVerified;
+    document.getElementById("statSTier").innerText = sTierCount;
+    document.getElementById("statGems").innerText = gemsCount;
 }
 
-function toggleGemsFilter() {
+function toggleGemsFilter(e) {
+    if (e && e.target && e.target.closest('.gem-info-bubble-wrapper')) return;
+
     showGemsOnly = !showGemsOnly;
     const btn = document.getElementById("btnToggleGem");
+    const labelSpan = btn.querySelector(".btn-label");
+
     if (showGemsOnly) {
         btn.classList.add("active");
-        btn.innerHTML = '💎 Hidden Gems Active <span style="font-size:0.75rem; opacity:0.8;">(Click to show all)</span>';
+        if (labelSpan) labelSpan.innerHTML = '💎 Hidden Gems Active <span style="font-size:0.75rem; opacity:0.8;">(Click to show all)</span>';
     } else {
         btn.classList.remove("active");
-        btn.innerHTML = '💎 Hidden Gems Only';
+        if (labelSpan) labelSpan.innerHTML = '💎 Hidden Gems Only';
     }
     filterAndRender();
 }
@@ -79,6 +90,26 @@ function filterAndRender() {
     renderGrid();
 }
 
+function formatTraderName(t) {
+    let name = (t.name || "").trim();
+    const addr = t.address || "";
+    const last4 = addr.length >= 4 ? addr.slice(-4) : "";
+    
+    const isGeneric = !name || /^polycop/i.test(name) || /^0x/i.test(name);
+    
+    if (isGeneric) {
+        return {
+            title: `Trader (${last4})`,
+            subText: ""
+        };
+    } else {
+        return {
+            title: name,
+            subText: addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : ""
+        };
+    }
+}
+
 function renderGrid() {
     const grid = document.getElementById("walletsGrid");
     if (filteredTargets.length === 0) {
@@ -93,6 +124,8 @@ function renderGrid() {
     grid.innerHTML = filteredTargets.map((t, idx) => {
         const isGem = t.is_hidden_gem;
         const cardClass = isGem ? "wallet-card card-gem" : "wallet-card";
+        const nameInfo = formatTraderName(t);
+        const subAddrHtml = nameInfo.subText ? `<div class="wallet-card-addr">${nameInfo.subText}</div>` : '';
         const gemBadgeHtml = isGem ? `
             <div class="badge-gem-wrapper">
                 <span class="badge-gem">💎 GEM</span>
@@ -108,10 +141,10 @@ function renderGrid() {
                 <div class="wallet-card-top">
                     <div>
                         <div class="wallet-card-name">
-                            ${t.name}
+                            ${nameInfo.title}
                             ${gemBadgeHtml}
                         </div>
-                        <div class="wallet-card-addr">${t.address.slice(0, 6)}...${t.address.slice(-4)}</div>
+                        ${subAddrHtml}
                     </div>
                     <div class="score-badge">${t.final_score} Pts</div>
                 </div>
@@ -151,7 +184,8 @@ function openModal(idx) {
     if (target.is_hidden_gem) modalContainer.classList.add("modal-gem");
     else modalContainer.classList.remove("modal-gem");
 
-    document.getElementById("modalTitle").innerText = target.name;
+    const nameInfo = formatTraderName(target);
+    document.getElementById("modalTitle").innerText = nameInfo.title;
     document.getElementById("modalAddr").innerText = `${target.address.slice(0, 8)}...${target.address.slice(-6)}`;
     document.getElementById("modalGradeBadge").innerText = target.grade;
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
@@ -346,6 +380,7 @@ async function startLeaderboardScan() {
         logFeed.innerHTML += `Screening complete! <strong>${verified.length} verified targets PASS 100% of hard rejection gates.</strong><br>`;
         
         allTargets = verified;
+        updateSummaryHeader({ total_scraped_profiles: profiles.length });
         filterAndRender();
 
         progressFill.style.width = "100%";
@@ -369,8 +404,9 @@ async function clearScanData() {
         const data = await resp.json();
         alert(data.message || "Data cache cleared.");
         allTargets = [];
+        updateSummaryHeader({});
         filterAndRender();
-        loadDataset();
+        await loadDataset();
     } catch (e) {
         alert("Failed to clear scan data: " + e.message);
     }
