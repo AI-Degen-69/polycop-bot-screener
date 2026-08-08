@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""
+PolyCop Bot Screener - Master Entry Point & Server Launcher
+Usage:
+    python screen.py
+    python screen.py --rescan
+"""
+
+import os
+import sys
+import webbrowser
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = os.path.join(SCRIPT_DIR, "app")
+SRC_DIR = os.path.join(APP_DIR, "src")
+DATA_DIR = os.path.join(APP_DIR, "data")
+VERIFIED_DATA_FILE = os.path.join(DATA_DIR, "phase2_verified_targets.json")
+
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+from pipeline.phase1_scrape_leaderboard import fetch_and_scrape_leaderboard
+from pipeline.phase2_filter_targets import run_phase2_filter
+from server.serve_web_app import start_server, PORT
+
+def main():
+    force_rescan = "--rescan" in sys.argv
+    test_mode = "--test" in sys.argv
+
+    print("==========================================================")
+    print("  [PolyCop Bot Screener] - Master Web App Launcher")
+    print("==========================================================")
+
+    # Step 1: Ensure dataset exists or run pipeline
+    if force_rescan or not os.path.exists(VERIFIED_DATA_FILE):
+        print("\n[PIPELINE] Dataset missing or rescan requested. Running pipeline...")
+        fetch_and_scrape_leaderboard(min_score=60.0)
+        run_phase2_filter()
+    else:
+        print(f"\n[PIPELINE] Verified dataset found: {VERIFIED_DATA_FILE}")
+
+    if test_mode:
+        print("[TEST] Startup check completed successfully.")
+        return
+
+    # Step 2: Open browser
+    app_url = f"http://localhost:{PORT}"
+    print(f"\n[SERVER] Launching PolyCop Bot Screener Web App at {app_url}...")
+    try:
+        webbrowser.open(app_url)
+    except Exception as e:
+        print(f"[NOTICE] Could not auto-open browser: {e}")
+
+    # Step 3: Start HTTP Proxy Server
+    start_server(PORT)
+
+if __name__ == "__main__":
+    main()

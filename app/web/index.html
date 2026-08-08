@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyCop Bot Screener - $100 Bankroll Trader Audit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-title">
+                <h1>PolyCop Bot Screener</h1>
+                <p>Continuous 100-Point Audit Engine &bull; $100 Bankroll Optimized &bull; Zero Toxic HFT Bots</p>
+            </div>
+            <div class="header-stats">
+                <div class="stat-pill">
+                    <div class="val" id="statTotalScanned">0</div>
+                    <div class="lbl">Total Scanned</div>
+                </div>
+                <div class="stat-pill">
+                    <div class="val" id="statVerified">0</div>
+                    <div class="lbl">Verified PASS</div>
+                </div>
+                <div class="stat-pill">
+                    <div class="val" id="statSTier">0</div>
+                    <div class="lbl">S-Tier (≥90)</div>
+                </div>
+                <div class="stat-pill">
+                    <div class="val" id="statGems">0</div>
+                    <div class="lbl">Hidden Gems</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="search-bar">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search by name or address (0x...)...">
+            <select id="sortSelect" class="sort-select">
+                <option value="score-desc">Sort by: Highest Screener Score</option>
+                <option value="score-asc">Sort by: Lowest Screener Score</option>
+                <option value="pnl-desc">Sort by: Highest Copy PnL</option>
+                <option value="wr-desc">Sort by: Highest Win Rate</option>
+                <option value="polycop-desc">Sort by: Highest PolyCop Site Score</option>
+            </select>
+            <button id="btnToggleGem" class="btn-toggle-gem">💎 Hidden Gems Only</button>
+            <div class="gem-info-bubble-wrapper">
+                <div class="gem-info-bubble">ℹ️</div>
+                <div class="gem-info-card">
+                    <strong>💎 How Hidden Gems Are Identified:</strong><br>
+                    Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
+                </div>
+            </div>
+            <button id="btnStartScan" class="btn-scan">⚡ Scan Leaderboard API</button>
+            <button id="btnClearData" class="btn-clear-data">🗑️ Clear Data</button>
+        </div>
+
+        <div class="wallets-grid" id="walletsGrid">
+            <!-- Grid cards populated dynamically -->
+        </div>
+    </div>
+
+    <!-- DETAIL MODAL DIALOG -->
+    <div class="modal-overlay" id="detailModal">
+        <div class="modal-container">
+            <button class="modal-close" onclick="closeModal()">✕</button>
+
+            <div class="modal-header">
+                <div>
+                    <div class="modal-header-top-row">
+                        <div class="modal-title" id="modalTitle">Trader Name</div>
+                        <span class="header-score-badge badge-screener" id="modalScreenerScore">92.5 / 100 Pts</span>
+                        <span class="header-score-badge badge-polycop" id="modalPolyCopScore">68 / 100 Site</span>
+                        <span class="header-score-badge" id="modalGradeBadge">S-Tier</span>
+                    </div>
+                    <div class="wallet-card-addr" id="modalAddr">0x0000...0000</div>
+                    <div class="modal-nav-controls">
+                        <button class="nav-btn" onclick="navigateModal(-1)">◄ Previous Target</button>
+                        <button class="nav-btn" onclick="navigateModal(1)">Next Target ►</button>
+                    </div>
+                </div>
+                <div>
+                    <a href="#" target="_blank" id="modalBacktestLink" class="modal-backtest-link">📈 View Profile on PolyCop ↗</a>
+                </div>
+            </div>
+
+            <!-- 6-CARD KPI MATRIX HEADER -->
+            <div class="modal-scores-row">
+                <div class="score-card-box">
+                    <div class="num" id="cardCopyPnl">$0.00</div>
+                    <div class="lbl">Backtest Copy PnL</div>
+                    <div class="tooltip-text">
+                        <strong>Backtest Copy PnL:</strong> Expected PnL if copied with $100 bankroll. Hard gate rejects any trader &lt; $0 (Toxic Copy Poison).
+                    </div>
+                </div>
+                <div class="score-card-box">
+                    <div class="num" id="cardPlRatio">0.00x</div>
+                    <div class="lbl">Avg P/L Ratio</div>
+                    <div class="tooltip-text">
+                        <strong>Avg Profit / Loss Ratio:</strong> Total Gross Profit &divide; Total Gross Loss. Rejects &lt; 0.3x (winning pennies, losing dollars).
+                    </div>
+                </div>
+                <div class="score-card-box">
+                    <div class="num" id="cardWinRate">0.0%</div>
+                    <div class="lbl">Recent 20 Win Rate</div>
+                    <div class="tooltip-text">
+                        <strong>Win Rate:</strong> Historical market win rate %. Hard gate rejects &lt; 45% (losing streak risk).
+                    </div>
+                </div>
+                <div class="score-card-box">
+                    <div class="num" id="cardRoi">0.0%</div>
+                    <div class="lbl">PnL / Vol ROI</div>
+                    <div class="tooltip-text">
+                        <strong>Capital Efficiency:</strong> PnL to Volume ratio. Higher ratio indicates thick profit margins.
+                    </div>
+                </div>
+                <div class="score-card-box">
+                    <div class="num" id="cardMarkets">0</div>
+                    <div class="lbl">Markets / Vol</div>
+                    <div class="tooltip-text">
+                        <strong>Sample Size:</strong> Total historical markets traded. Rejects &lt; 20 (lucky streak risk).
+                    </div>
+                </div>
+                <div class="score-card-box">
+                    <div class="num" id="cardFloorMin">$0.00</div>
+                    <div class="lbl">$1.00 Floor Min Order</div>
+                    <div class="tooltip-text">
+                        <strong>$1.00 Order Floor:</strong> Minimum order size target trader must place for your scaled copy trade to reach Polymarket's $1.00 order minimum.
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-grid">
+                <div class="modal-col-7">
+                    <div class="modal-card">
+                        <div class="modal-card-title">📊 9-Parameter Continuous Audit Breakdown</div>
+                        <div class="param-bar-container" id="paramBarsContainer">
+                            <!-- Dynamic parameter bars populated by app.js -->
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-col-5">
+                    <div class="modal-card">
+                        <div class="modal-card-title">🕸️ Trader Performance Radar</div>
+                        <div class="chart-box">
+                            <canvas id="radarChartCanvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LIVE SCANNING OVERLAY -->
+    <div class="scan-overlay" id="scanOverlay">
+        <div class="scan-container">
+            <div class="scanner-radar-box">
+                <div class="radar-circle"></div>
+                <div class="radar-circle radar-circle-2"></div>
+                <div class="radar-center-icon">📡</div>
+            </div>
+            <h2 style="font-size: 1.4rem; font-weight: 700;">Scanning PolyCop Leaderboard API...</h2>
+            <p id="scanStatusText" style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.4rem;">Paginating profiles &bull; PolyCop Score &gt; 60</p>
+            
+            <div class="scan-progress-bar">
+                <div class="scan-progress-fill" id="scanProgressFill"></div>
+            </div>
+
+            <div class="scan-log-feed" id="scanLogFeed"></div>
+        </div>
+    </div>
+
+    <script src="/js/client_score_engine.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
