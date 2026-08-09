@@ -435,3 +435,294 @@ async function clearScanData() {
         alert("Failed to clear scan data: " + e.message);
     }
 }
+
+// ==========================================================================
+// TAB NAVIGATION & LATENCY PROFILER PAGE INTERACTIVITY
+// ==========================================================================
+let globeAnimFrameId = null;
+let packetsList = [];
+let isTestActive = false;
+
+function switchTab(tabId) {
+    document.querySelectorAll(".sidebar-nav .nav-item").forEach(btn => btn.classList.remove("active"));
+    document.querySelectorAll(".page-view").forEach(view => view.classList.remove("active"));
+
+    if (tabId === "screener") {
+        document.getElementById("navScreener").classList.add("active");
+        document.getElementById("pageScreener").classList.add("active");
+    } else if (tabId === "latency") {
+        document.getElementById("navLatency").classList.add("active");
+        document.getElementById("pageLatency").classList.add("active");
+        initGlobeAnimation();
+        renderGaugeMeter(370.75); // Initial sample gauge state
+    }
+}
+
+// ==========================================================================
+// ANIMATED PACKET GLOBE VISUALIZER (CANVAS)
+// ==========================================================================
+function initGlobeAnimation() {
+    const canvas = document.getElementById("globeCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (globeAnimFrameId) cancelAnimationFrame(globeAnimFrameId);
+
+    let angle = 0;
+    
+    // Create initial packet particles
+    packetsList = [];
+    for (let i = 0; i < 6; i++) {
+        packetsList.push({
+            progress: Math.random(),
+            speed: 0.008 + Math.random() * 0.005,
+            direction: i % 2 === 0 ? 1 : -1
+        });
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const radius = 70;
+
+        // Draw outer glow
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius + 10, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0, 242, 254, 0.03)";
+        ctx.fill();
+
+        // Draw Wireframe Globe Latitudes / Longitudes
+        angle += 0.005;
+        ctx.strokeStyle = "rgba(0, 242, 254, 0.18)";
+        ctx.lineWidth = 1;
+
+        for (let i = -2; i <= 2; i++) {
+            ctx.beginPath();
+            const r = Math.sqrt(radius * radius - (i * 22) * (i * 22));
+            ctx.ellipse(cx, cy + i * 22, r, r * 0.35, 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        for (let i = 0; i < 6; i++) {
+            const rot = angle + (i * Math.PI / 3);
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, radius * Math.abs(Math.cos(rot)), radius, 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // Host Node (Left) & Polymarket Gateway Node (Right)
+        const hostX = cx - 180;
+        const hostY = cy;
+        const targetX = cx + 180;
+        const targetY = cy;
+
+        // Host Node
+        ctx.beginPath();
+        ctx.arc(hostX, hostY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "#00f2fe";
+        ctx.fill();
+        ctx.shadowColor = "#00f2fe";
+        ctx.shadowBlur = 10;
+        ctx.font = "bold 11px Outfit, sans-serif";
+        ctx.fillStyle = "#fff";
+        ctx.fillText("CLIENT NODE", hostX - 35, hostY + 22);
+
+        // Target CLOB Node
+        ctx.beginPath();
+        ctx.arc(targetX, targetY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "#00e676";
+        ctx.fill();
+        ctx.shadowColor = "#00e676";
+        ctx.shadowBlur = 10;
+        ctx.fillText("POLY CLOB GATEWAY", targetX - 50, targetY + 22);
+        ctx.shadowBlur = 0;
+
+        // Connecting Packet Transmission Arcs
+        ctx.beginPath();
+        ctx.moveTo(hostX, hostY);
+        ctx.quadraticCurveTo(cx, cy - 60, targetX, targetY);
+        ctx.strokeStyle = "rgba(0, 242, 254, 0.25)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Animate Traveling Packets
+        packetsList.forEach(p => {
+            p.progress += isTestActive ? p.speed * 2.5 : p.speed;
+            if (p.progress > 1) p.progress = 0;
+
+            const t = p.progress;
+            const px = (1 - t) * (1 - t) * hostX + 2 * (1 - t) * t * cx + t * t * targetX;
+            const py = (1 - t) * (1 - t) * hostY + 2 * (1 - t) * t * (cy - 60) + t * t * targetY;
+
+            ctx.beginPath();
+            ctx.arc(px, py, 4, 0, Math.PI * 2);
+            ctx.fillStyle = p.direction === 1 ? "#00f2fe" : "#00e676";
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = 12;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        });
+
+        globeAnimFrameId = requestAnimationFrame(draw);
+    }
+    draw();
+}
+
+// ==========================================================================
+// 5-LEVEL LATENCY GAUGE METER RENDERER
+// ==========================================================================
+function renderGaugeMeter(rttMs) {
+    const canvas = document.getElementById("gaugeCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const cx = canvas.width / 2;
+    const cy = canvas.height - 15;
+    const radius = 100;
+    const lineWidth = 18;
+
+    // 5-Level Color Scale Segments (PI to 2*PI semi-circle)
+    const segments = [
+        { label: "Fast", color: "#00e676", endPct: 0.2 },
+        { label: "Good", color: "#69f0ae", endPct: 0.4 },
+        { label: "Average", color: "#ffd600", endPct: 0.6 },
+        { label: "Slow", color: "#ff9100", endPct: 0.8 },
+        { label: "Poor", color: "#ff1744", endPct: 1.0 }
+    ];
+
+    let startAngle = Math.PI;
+    segments.forEach(s => {
+        const endAngle = Math.PI + (s.endPct * Math.PI);
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, startAngle, endAngle);
+        ctx.lineWidth = lineWidth;
+        ctx.strokeStyle = s.color;
+        ctx.lineCap = "butt";
+        ctx.stroke();
+        startAngle = endAngle;
+    });
+
+    // Gauge Meter Needle Angle Calculation
+    let pct = 0;
+    let tierText = "🟡 AVERAGE";
+    let tierClass = "tier-average";
+
+    if (rttMs < 100) {
+        pct = (rttMs / 100) * 0.2;
+        tierText = "⚡ FAST";
+        tierClass = "tier-fast";
+    } else if (rttMs < 250) {
+        pct = 0.2 + ((rttMs - 100) / 150) * 0.2;
+        tierText = "🟢 GOOD";
+        tierClass = "tier-good";
+    } else if (rttMs < 500) {
+        pct = 0.4 + ((rttMs - 250) / 250) * 0.2;
+        tierText = "🟡 AVERAGE";
+        tierClass = "tier-average";
+    } else if (rttMs < 1000) {
+        pct = 0.6 + ((rttMs - 500) / 500) * 0.2;
+        tierText = "🟠 SLOW";
+        tierClass = "tier-slow";
+    } else {
+        pct = 0.8 + Math.min(0.2, ((rttMs - 1000) / 1000) * 0.2);
+        tierText = "🔴 POOR";
+        tierClass = "tier-poor";
+    }
+
+    const needleAngle = Math.PI + (pct * Math.PI);
+
+    // Draw Needle Pointer
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(needleAngle);
+
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(radius - 12, 0);
+    ctx.lineTo(0, 4);
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 8;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fillStyle = "#00f2fe";
+    ctx.fill();
+    ctx.restore();
+
+    // Update Status Badge Element
+    const badgeEl = document.getElementById("latencyStatusBadge");
+    if (badgeEl) {
+        badgeEl.className = `latency-badge ${tierClass}`;
+        badgeEl.innerText = `${tierText} (${rttMs.toFixed(1)} ms)`;
+    }
+}
+
+// ==========================================================================
+// LIVE LATENCY BENCHMARK RUNNER
+// ==========================================================================
+async function runLatencyTest() {
+    const btn = document.getElementById("btnRunLatencyTest");
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="pulse-dot"></span> Benchmarking CLOB Latency...`;
+    isTestActive = true;
+
+    try {
+        const resp = await fetch("/api/measure_latency?t=" + Date.now());
+        if (!resp.ok) throw new Error("API response error");
+        const data = await resp.json();
+
+        const httpStats = data.latency?.http_rtt_ms || { avg: 0, min: 0, max: 0 };
+        const wsStats = data.latency?.ws_rtt_ms || { avg: 0 };
+
+        document.getElementById("kpiHttpAvg").innerText = `${httpStats.avg.toFixed(1)} ms`;
+        document.getElementById("kpiHttpMin").innerText = `${httpStats.min.toFixed(1)} ms`;
+        document.getElementById("kpiHttpMax").innerText = `${httpStats.max.toFixed(1)} ms`;
+        document.getElementById("kpiWsAvg").innerText = `${wsStats.avg.toFixed(1)} ms`;
+
+        // Update Gauge Needle
+        renderGaugeMeter(httpStats.avg);
+
+        // Update Slippage Table
+        const m5Slippage = data.markets?.5m_markets?.slippage_pct || {};
+        const m15Slippage = data.markets?.15m_markets?.slippage_pct || {};
+        const sizes = ["$10", "$25", "$50", "$100", "$250"];
+
+        let html = "";
+        sizes.forEach(size => {
+            const v5 = m5Slippage[size] ?? 0;
+            const v15 = m15Slippage[size] ?? 0;
+            const maxVal = Math.max(v5, v15);
+            let badgeHtml = '<span class="friction-badge badge-clean">Zero Friction</span>';
+            if (maxVal > 0.3) badgeHtml = '<span class="friction-badge badge-med">Moderate Friction</span>';
+            else if (maxVal > 0.0) badgeHtml = '<span class="friction-badge badge-low">Low Friction</span>';
+
+            html += `
+                <tr>
+                    <td class="size-col">${size}.00</td>
+                    <td>${v5.toFixed(2)}%</td>
+                    <td>${v15.toFixed(2)}%</td>
+                    <td>${badgeHtml}</td>
+                </tr>
+            `;
+        });
+        document.getElementById("slippageTableBody").innerHTML = html;
+
+        document.getElementById("lblLastTested").innerText = `Last Tested: ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+        console.error("Latency benchmark error:", err);
+        alert("Benchmark test failed: " + err.message);
+    } finally {
+        isTestActive = false;
+        btn.disabled = false;
+        btn.innerHTML = `<span class="btn-icon">⚡</span> Run Live Benchmark Test`;
+    }
+}
+
