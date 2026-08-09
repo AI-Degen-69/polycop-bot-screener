@@ -2,20 +2,29 @@ import pytest
 from tools.measure_latency_slippage import calculate_vwap_slippage, filter_prediction_markets
 
 def test_calculate_vwap_slippage_basic():
-    # Orderbook asks: [price, size_shares]
-    # Price 0.50 with 20 shares ($10 worth)
-    # Price 0.55 with 100 shares ($55 worth)
-    asks = [["0.50", "20"], ["0.55", "100"]]
+    # Orderbook asks: list of lists
+    asks_list = [["0.50", "20"], ["0.55", "100"]]
     
-    # Test $10 trade -> filled completely at 0.50 -> 0% slippage
-    res_10 = calculate_vwap_slippage(asks, 10.0)
+    res_10 = calculate_vwap_slippage(asks_list, 10.0)
     assert res_10["best_ask"] == 0.50
     assert res_10["vwap"] == 0.50
     assert res_10["slippage_pct"] == 0.0
 
-    # Test $30 trade -> 20 shares @ 0.50 ($10), 36.36 shares @ 0.55 ($20)
-    # Total USD = $30, Total Shares = 56.3636, VWAP = 30 / 56.3636 = 0.53225 -> ~6.45% slippage
-    res_30 = calculate_vwap_slippage(asks, 30.0)
+    res_30 = calculate_vwap_slippage(asks_list, 30.0)
+    assert res_30["best_ask"] == 0.50
+    assert res_30["vwap"] > 0.50
+    assert res_30["slippage_pct"] > 0.0
+
+def test_calculate_vwap_slippage_dicts():
+    # Orderbook asks: list of dicts from CLOB REST API
+    asks_dicts = [{"price": "0.50", "size": "20"}, {"price": "0.55", "size": "100"}]
+    
+    res_10 = calculate_vwap_slippage(asks_dicts, 10.0)
+    assert res_10["best_ask"] == 0.50
+    assert res_10["vwap"] == 0.50
+    assert res_10["slippage_pct"] == 0.0
+
+    res_30 = calculate_vwap_slippage(asks_dicts, 30.0)
     assert res_30["best_ask"] == 0.50
     assert res_30["vwap"] > 0.50
     assert res_30["slippage_pct"] > 0.0
