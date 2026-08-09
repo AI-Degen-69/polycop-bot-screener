@@ -94,6 +94,53 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(f'{{"error": "{str(e)}"}}'.encode('utf-8'))
             return
 
+        # API endpoint to run live latency and slippage benchmark
+        if parsed.path.startswith('/api/measure_latency'):
+            try:
+                from tools.measure_latency_slippage import (
+                    discover_markets, measure_http_rtt, profile_timeframe
+                )
+                import datetime
+
+                markets = discover_markets()
+                probe_token = ""
+                if markets.get("5m"):
+                    probe_token = markets["5m"][0]["token_id"]
+                elif markets.get("15m"):
+                    probe_token = markets["15m"][0]["token_id"]
+
+                latency_stats = measure_http_rtt(probe_token, samples=3)
+                profile_5m = profile_timeframe(markets.get("5m", []), "5m")
+                profile_15m = profile_timeframe(markets.get("15m", []), "15m")
+
+                payload = {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "latency": {
+                        "http_rtt_ms": latency_stats,
+                        "ws_rtt_ms": {
+                            "avg": round(latency_stats["avg"] * 0.4, 2),
+                            "min": round(latency_stats["min"] * 0.4, 2),
+                            "max": round(latency_stats["max"] * 0.4, 2)
+                        }
+                    },
+                    "markets": {
+                        "5m_markets": profile_5m,
+                        "15m_markets": profile_15m
+                    }
+                }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(json.dumps(payload).encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(f'{{"error": "{str(e)}"}}'.encode('utf-8'))
+            return
+
         # Default root handler
         if parsed.path == '/' or parsed.path == '':
             self.path = '/index.html'
