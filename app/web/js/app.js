@@ -7,15 +7,18 @@ let showGemsOnly = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     loadDataset();
-    document.getElementById("searchInput").addEventListener("input", filterAndRender);
-    document.getElementById("sortSelect").addEventListener("change", filterAndRender);
-    document.getElementById("btnToggleGem").addEventListener("click", toggleGemsFilter);
-    document.getElementById("btnStartScan").addEventListener("click", startLeaderboardScan);
-    document.getElementById("btnClearData").addEventListener("click", clearScanData);
+    document.getElementById("searchInput")?.addEventListener("input", filterAndRender);
+    document.getElementById("sortSelect")?.addEventListener("change", filterAndRender);
+    document.getElementById("btnToggleGem")?.addEventListener("click", toggleGemsFilter);
+    document.getElementById("btnStartScan")?.addEventListener("click", startLeaderboardScan);
+    document.getElementById("btnClearData")?.addEventListener("click", clearScanData);
+    document.getElementById("navScreener")?.addEventListener("click", () => switchTab("screener"));
+    document.getElementById("navLatency")?.addEventListener("click", () => switchTab("latency"));
+    document.getElementById("btnRunLatencyTest")?.addEventListener("click", runLatencyTest);
 
     document.addEventListener("keydown", (e) => {
         const modal = document.getElementById("detailModal");
-        if (!modal.classList.contains("active")) return;
+        if (!modal || !modal.classList.contains("active")) return;
         if (e.key === "Escape") closeModal();
         if (e.key === "ArrowLeft") navigateModal(-1);
         if (e.key === "ArrowRight") navigateModal(1);
@@ -444,19 +447,25 @@ let packetsList = [];
 let isTestActive = false;
 
 function switchTab(tabId) {
+    console.log("Switching tab to:", tabId);
     document.querySelectorAll(".sidebar-nav .nav-item").forEach(btn => btn.classList.remove("active"));
     document.querySelectorAll(".page-view").forEach(view => view.classList.remove("active"));
 
     if (tabId === "screener") {
-        document.getElementById("navScreener").classList.add("active");
-        document.getElementById("pageScreener").classList.add("active");
+        document.getElementById("navScreener")?.classList.add("active");
+        document.getElementById("pageScreener")?.classList.add("active");
     } else if (tabId === "latency") {
-        document.getElementById("navLatency").classList.add("active");
-        document.getElementById("pageLatency").classList.add("active");
-        initGlobeAnimation();
-        renderGaugeMeter(370.75); // Initial sample gauge state
+        document.getElementById("navLatency")?.classList.add("active");
+        document.getElementById("pageLatency")?.classList.add("active");
+        try {
+            initGlobeAnimation();
+            renderGaugeMeter(370.75); // Initial sample gauge state
+        } catch (e) {
+            console.error("Canvas render error:", e);
+        }
     }
 }
+window.switchTab = switchTab;
 
 // ==========================================================================
 // ANIMATED PACKET GLOBE VISUALIZER (CANVAS)
@@ -498,16 +507,20 @@ function initGlobeAnimation() {
         ctx.lineWidth = 1;
 
         for (let i = -2; i <= 2; i++) {
-            ctx.beginPath();
-            const r = Math.sqrt(radius * radius - (i * 22) * (i * 22));
-            ctx.ellipse(cx, cy + i * 22, r, r * 0.35, 0, 0, Math.PI * 2);
-            ctx.stroke();
+            const radSq = radius * radius - (i * 22) * (i * 22);
+            if (radSq > 0) {
+                const r = Math.sqrt(radSq);
+                ctx.beginPath();
+                ctx.ellipse(cx, cy + i * 22, r, Math.max(0.1, r * 0.35), 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
         }
 
         for (let i = 0; i < 6; i++) {
             const rot = angle + (i * Math.PI / 3);
+            const radiusX = Math.max(0.1, radius * Math.abs(Math.cos(rot)));
             ctx.beginPath();
-            ctx.ellipse(cx, cy, radius * Math.abs(Math.cos(rot)), radius, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx, cy, radiusX, radius, 0, 0, Math.PI * 2);
             ctx.stroke();
         }
 
