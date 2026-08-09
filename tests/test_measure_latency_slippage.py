@@ -1,5 +1,5 @@
 import pytest
-from tools.measure_latency_slippage import calculate_vwap_slippage
+from tools.measure_latency_slippage import calculate_vwap_slippage, filter_prediction_markets
 
 def test_calculate_vwap_slippage_basic():
     # Orderbook asks: [price, size_shares]
@@ -25,3 +25,14 @@ def test_calculate_vwap_slippage_empty():
     assert res["best_ask"] == 0.0
     assert res["vwap"] == 0.0
     assert res["slippage_pct"] == 0.0
+
+def test_filter_prediction_markets():
+    raw_events = [
+        {"title": "BTC 5 Min Up/Down", "clobTokenIds": ["token1"], "slug": "btc-5m"},
+        {"title": "ETH 15 Min Up/Down", "clobTokenIds": ["token2"], "slug": "eth-15m"},
+        {"title": "Presidential Election 2028", "clobTokenIds": ["token3"], "slug": "election"}
+    ]
+    categorized = filter_prediction_markets(raw_events)
+    assert len(categorized["5m"]) == 1
+    assert len(categorized["15m"]) == 1
+    assert categorized["5m"][0]["token_id"] == "token1"
