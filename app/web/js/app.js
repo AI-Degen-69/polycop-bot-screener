@@ -4,21 +4,58 @@ let currentModalIndex = 0;
 let currentModalAddr = "";
 let radarChartInstance = null;
 let showGemsOnly = false;
+let activityFilter = "all";
+let copyReadyOnly = false;
+
+// Upper age bound in hours per sidebar activity bucket. "all" means no filter.
+const ACTIVITY_MAX_HOURS = { live: 6, today: 24, d3: 72, d7: 168 };
+
+// `min_target_order_floor_usd` is the smallest target order whose proportional
+// copy still clears Polymarket's $1.00 minimum. The $300 avg-invest hard gate
+// already caps that floor at $100, so $100 would filter nothing. $25 is the
+// level where a $100 bankroll still copies the target's *small* trades instead
+// of silently skipping them.
+const COPY_READY_FLOOR_USD = 25.0;
 
 document.addEventListener("DOMContentLoaded", () => {
     loadDataset();
-    document.getElementById("searchInput").addEventListener("input", filterAndRender);
-    document.getElementById("sortSelect").addEventListener("change", filterAndRender);
-    document.getElementById("btnToggleGem").addEventListener("click", toggleGemsFilter);
-    document.getElementById("btnStartScan").addEventListener("click", startLeaderboardScan);
-    document.getElementById("btnClearData").addEventListener("click", clearScanData);
+    document.getElementById("searchInput")?.addEventListener("input", filterAndRender);
+    document.getElementById("sortSelect")?.addEventListener("change", filterAndRender);
+    document.getElementById("btnToggleGem")?.addEventListener("click", toggleGemsFilter);
+    document.getElementById("btnStartScan")?.addEventListener("click", startLeaderboardScan);
+    document.getElementById("btnClearData")?.addEventListener("click", clearScanData);
+    document.getElementById("navScreener")?.addEventListener("click", () => switchTab("screener"));
+    document.getElementById("navLatency")?.addEventListener("click", () => switchTab("latency"));
+    document.getElementById("btnRunLatencyTest")?.addEventListener("click", runLatencyTest);
+    document.getElementById("chkCopyReady")?.addEventListener("change", (e) => {
+        copyReadyOnly = e.target.checked;
+        filterAndRender();
+    });
+    document.getElementById("btnResetFilters")?.addEventListener("click", resetFilters);
+    document.querySelectorAll(".activity-filter").forEach(btn => {
+        btn.addEventListener("click", () => setActivityFilter(btn.dataset.activity));
+    });
 
     document.addEventListener("keydown", (e) => {
         const modal = document.getElementById("detailModal");
-        if (!modal.classList.contains("active")) return;
+        if (!modal || !modal.classList.contains("active")) return;
         if (e.key === "Escape") closeModal();
         if (e.key === "ArrowLeft") navigateModal(-1);
         if (e.key === "ArrowRight") navigateModal(1);
+    });
+
+    // Dismiss any focused tooltip on Escape (close but keep modal logic above intact)
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        const active = document.activeElement;
+        if (active && active.classList && (
+            active.classList.contains("kpi-card") ||
+            active.classList.contains("latency-badge-wrapper") ||
+            active.classList.contains("th-info") ||
+            active.classList.contains("friction-badge")
+        )) {
+            active.blur();
+        }
     });
 });
 
@@ -55,6 +92,66 @@ function updateSummaryHeader(data = {}) {
     document.getElementById("statGems").innerText = gemsCount;
 }
 
+function activityHours(t) {
+    const h = t.activity ? t.activity.hours_since_active : null;
+    return (h === null || h === undefined) ? Infinity : h;
+}
+
+function matchesActivityFilter(t) {
+    if (activityFilter === "all") return true;
+    const maxHours = ACTIVITY_MAX_HOURS[activityFilter];
+    if (maxHours === undefined) return true;
+    return activityHours(t) < maxHours;
+}
+
+function isCopyReady(t) {
+    const floor = t.bankroll_analysis ? t.bankroll_analysis.min_target_order_floor_usd : 0;
+    return floor > 0 && floor <= COPY_READY_FLOOR_USD;
+}
+
+function setActivityFilter(key) {
+    activityFilter = key || "all";
+    document.querySelectorAll(".activity-filter").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.activity === activityFilter);
+    });
+    filterAndRender();
+}
+
+function resetFilters() {
+    copyReadyOnly = false;
+    const chk = document.getElementById("chkCopyReady");
+    if (chk) chk.checked = false;
+    const search = document.getElementById("searchInput");
+    if (search) search.value = "";
+    if (showGemsOnly) toggleGemsFilter();
+    setActivityFilter("all");
+}
+
+function updateActivityCounts() {
+    const counts = { all: allTargets.length, live: 0, today: 0, d3: 0, d7: 0 };
+    allTargets.forEach(t => {
+        const h = activityHours(t);
+        // Buckets are cumulative: anything live also counts as "today".
+        if (h < ACTIVITY_MAX_HOURS.live) counts.live++;
+        if (h < ACTIVITY_MAX_HOURS.today) counts.today++;
+        if (h < ACTIVITY_MAX_HOURS.d3) counts.d3++;
+        if (h < ACTIVITY_MAX_HOURS.d7) counts.d7++;
+    });
+    Object.keys(counts).forEach(key => {
+        const el = document.querySelector(`.af-count[data-count="${key}"]`);
+        if (el) el.innerText = counts[key];
+    });
+}
+
+function formatLastActive(t) {
+    const h = activityHours(t);
+    if (!isFinite(h)) return { text: "Unknown", tier: "stale" };
+    if (h < 1) return { text: `${Math.round(h * 60)}m ago`, tier: "live" };
+    if (h < 24) return { text: `${Math.round(h)}h ago`, tier: h < 6 ? "live" : "today" };
+    const days = Math.floor(h / 24);
+    return { text: `${days}d ago`, tier: days < 3 ? "d3" : (days < 7 ? "d7" : "stale") };
+}
+
 function toggleGemsFilter(e) {
     if (e && e.target && e.target.closest('.gem-info-bubble-wrapper')) return;
 
@@ -80,7 +177,8 @@ function filterAndRender() {
         const formattedTitle = formatTraderName(t).title.toLowerCase();
         const matchesSearch = t.name.toLowerCase().includes(search) || t.address.toLowerCase().includes(search) || formattedTitle.includes(search);
         const matchesGem = !showGemsOnly || t.is_hidden_gem;
-        return matchesSearch && matchesGem;
+        const matchesCopyReady = !copyReadyOnly || isCopyReady(t);
+        return matchesSearch && matchesGem && matchesActivityFilter(t) && matchesCopyReady;
     });
 
     if (sortVal === "score-desc") filteredTargets.sort((a, b) => b.final_score - a.final_score);
@@ -88,7 +186,10 @@ function filterAndRender() {
     else if (sortVal === "pnl-desc") filteredTargets.sort((a, b) => b.metrics.copy_pnl - a.metrics.copy_pnl);
     else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => b.metrics.r20_win_rate - a.metrics.r20_win_rate);
     else if (sortVal === "polycop-desc") filteredTargets.sort((a, b) => b.metrics.polycop_site_score - a.metrics.polycop_site_score);
+    else if (sortVal === "activity-desc") filteredTargets.sort((a, b) => activityHours(a) - activityHours(b));
+    else if (sortVal === "trades7d-desc") filteredTargets.sort((a, b) => ((b.activity?.trades_7d) || 0) - ((a.activity?.trades_7d) || 0));
 
+    updateActivityCounts();
     renderGrid();
 }
 
@@ -147,6 +248,7 @@ function renderGrid() {
             </div>
         ` : '';
 
+        const lastActive = formatLastActive(t);
         const buyPrice = t.metrics ? (t.metrics.buy_price || 0.0) : 0.0;
         const highBuyBadgeHtml = buyPrice > 0.85 ? `
             <div class="badge-high-buy-wrapper" style="display:inline-block;">
@@ -189,6 +291,14 @@ function renderGrid() {
                     <div class="summary-cell">
                         <span class="summary-lbl">Avg Invest</span>
                         <span class="summary-val">$${t.metrics.avg_invest}</span>
+                    </div>
+                    <div class="summary-cell">
+                        <span class="summary-lbl">Last Active</span>
+                        <span class="summary-val activity-val" data-tier="${lastActive.tier}">${lastActive.text}</span>
+                    </div>
+                    <div class="summary-cell">
+                        <span class="summary-lbl">Trades (7d)</span>
+                        <span class="summary-val">${t.activity?.trades_7d ?? 0}</span>
                     </div>
                 </div>
             </div>
@@ -367,71 +477,516 @@ function renderRadarChart(target) {
     });
 }
 
+// ==========================================================================
+// LEADERBOARD SCANNER & DATA MANAGEMENT
+// ==========================================================================
 async function startLeaderboardScan() {
-    const overlay = document.getElementById("scanOverlay");
-    const progressFill = document.getElementById("scanProgressFill");
-    const logFeed = document.getElementById("scanLogFeed");
-    const statusText = document.getElementById("scanStatusText");
+    const btn = document.getElementById("btnStartScan");
+    if (!btn) return;
 
-    overlay.classList.add("active");
-    logFeed.innerHTML = "=== STARTING AUTOMATED POLYCOP LEADERBOARD SCAN ===<br>";
-    logFeed.innerHTML += "Executing Python Phase 1 & Phase 2 Pipeline on backend...<br>";
-    progressFill.style.width = "25%";
+    btn.disabled = true;
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = `<span class="pulse-dot"></span> Scanning PolyCop Leaderboard...`;
 
     try {
-        logFeed.innerHTML += "Scraping PolyCop leaderboard API and screening wallets against hard gates...<br>";
-        progressFill.style.width = "50%";
-
-        const resp = await fetch("/api/rescan");
-        if (!resp.ok) {
-            const errData = await resp.json().catch(() => ({}));
-            throw new Error(errData.error || `Server returned status ${resp.status}`);
-        }
-
+        const resp = await fetch("/api/rescan?t=" + Date.now());
+        if (!resp.ok) throw new Error("Rescan API returned status " + resp.status);
         const data = await resp.json();
         allTargets = data.verified_targets || [];
-
-        progressFill.style.width = "90%";
-        logFeed.innerHTML += `Screening complete! <strong>${allTargets.length} verified targets PASS 100% of hard rejection gates.</strong><br>`;
-        logFeed.innerHTML += `Dataset successfully saved to disk (app/data/phase2_verified_targets.json).<br>`;
-        logFeed.scrollTop = logFeed.scrollHeight;
-
-        // Reset gems filter so user sees all targets immediately
-        if (showGemsOnly) {
-            showGemsOnly = false;
-            const btn = document.getElementById("btnToggleGem");
-            if (btn) {
-                btn.classList.remove("active");
-                const labelSpan = btn.querySelector(".btn-label");
-                if (labelSpan) labelSpan.innerHTML = '💎 Hidden Gems Only';
-            }
-        }
-
         updateSummaryHeader(data);
         filterAndRender();
-
-        progressFill.style.width = "100%";
-        statusText.innerText = "Scan Complete!";
-
-        setTimeout(() => {
-            overlay.classList.remove("active");
-        }, 1200);
-
-    } catch (e) {
-        logFeed.innerHTML += `<span style="color:#ef4444">Scan Error: ${e.message}</span><br>`;
-        statusText.innerText = "Scan Failed!";
-        setTimeout(() => overlay.classList.remove("active"), 2500);
+        alert(`Scan Complete!\nTotal Scraped: ${data.total_scraped_profiles || 0}\nVerified Targets: ${data.total_verified_targets || 0}`);
+    } catch (err) {
+        console.error("Leaderboard scan error:", err);
+        alert("Scan failed: " + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
     }
 }
 
 async function clearScanData() {
-    if (!confirm("Are you sure you want to clear all cached scan datasets?")) return;
+    if (!confirm("Are you sure you want to clear cached scan data?")) return;
+
     try {
-        const resp = await fetch("/api/clear_data");
-        const data = await resp.json();
-        alert(data.message || "Data cache cleared.");
-        window.location.reload();
-    } catch (e) {
-        alert("Failed to clear scan data: " + e.message);
+        const resp = await fetch("/api/clear_data?t=" + Date.now());
+        if (!resp.ok) throw new Error("Clear data API error");
+        allTargets = [];
+        filteredTargets = [];
+        updateSummaryHeader({});
+        loadDataset();
+    } catch (err) {
+        console.error("Clear data error:", err);
+        alert("Failed to clear data: " + err.message);
     }
 }
+
+window.startLeaderboardScan = startLeaderboardScan;
+window.clearScanData = clearScanData;
+
+// ==========================================================================
+// TAB NAVIGATION & LATENCY PROFILER PAGE INTERACTIVITY
+// ==========================================================================
+let globeAnimFrameId = null;
+let packetsList = [];
+let isTestActive = false;
+
+function switchTab(tabId) {
+    document.querySelectorAll(".sidebar-nav .nav-item").forEach(btn => btn.classList.remove("active"));
+    document.querySelectorAll(".page-view").forEach(view => view.classList.remove("active"));
+
+    if (tabId === "screener") {
+        document.getElementById("navScreener")?.classList.add("active");
+        document.getElementById("pageScreener")?.classList.add("active");
+        if (globeAnimFrameId) {
+            cancelAnimationFrame(globeAnimFrameId);
+            globeAnimFrameId = null;
+        }
+    } else if (tabId === "latency") {
+        document.getElementById("navLatency")?.classList.add("active");
+        document.getElementById("pageLatency")?.classList.add("active");
+        try {
+            initGlobeAnimation();
+            renderGaugeMeter(0);
+            renderDistributionPanel(0, 0, 0);
+        } catch (e) {
+            console.error("Canvas render error:", e);
+        }
+    }
+}
+window.switchTab = switchTab;
+
+// ==========================================================================
+// ANIMATED PACKET GLOBE VISUALIZER (CANVAS)
+// ==========================================================================
+function initGlobeAnimation() {
+    const canvas = document.getElementById("globeCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (globeAnimFrameId) cancelAnimationFrame(globeAnimFrameId);
+
+    let angle = 0;
+    
+    // Create initial packet particles
+    packetsList = [];
+    for (let i = 0; i < 6; i++) {
+        packetsList.push({
+            progress: Math.random(),
+            speed: 0.008 + Math.random() * 0.005,
+            direction: i % 2 === 0 ? 1 : -1
+        });
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const radius = 70;
+
+        // Draw outer glow
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius + 10, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0, 242, 254, 0.03)";
+        ctx.fill();
+
+        // Draw Wireframe Globe Latitudes / Longitudes
+        angle += 0.005;
+        ctx.strokeStyle = "rgba(0, 242, 254, 0.18)";
+        ctx.lineWidth = 1;
+
+        for (let i = -2; i <= 2; i++) {
+            const radSq = radius * radius - (i * 22) * (i * 22);
+            if (radSq > 0) {
+                const r = Math.sqrt(radSq);
+                ctx.beginPath();
+                ctx.ellipse(cx, cy + i * 22, r, Math.max(0.1, r * 0.35), 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+
+        for (let i = 0; i < 6; i++) {
+            const rot = angle + (i * Math.PI / 3);
+            const radiusX = Math.max(0.1, radius * Math.abs(Math.cos(rot)));
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, radiusX, radius, 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // Host Node (Left) & Polymarket Gateway Node (Right)
+        const hostX = cx - 180;
+        const hostY = cy;
+        const targetX = cx + 180;
+        const targetY = cy;
+
+        // Host Node
+        ctx.beginPath();
+        ctx.arc(hostX, hostY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "#00f2fe";
+        ctx.fill();
+        ctx.shadowColor = "#00f2fe";
+        ctx.shadowBlur = 10;
+        ctx.font = "bold 11px Outfit, sans-serif";
+        ctx.fillStyle = "#fff";
+        ctx.fillText("CLIENT NODE", hostX - 35, hostY + 22);
+
+        // Target CLOB Node
+        ctx.beginPath();
+        ctx.arc(targetX, targetY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "#00e676";
+        ctx.fill();
+        ctx.shadowColor = "#00e676";
+        ctx.shadowBlur = 10;
+        ctx.fillText("POLY CLOB GATEWAY", targetX - 50, targetY + 22);
+        ctx.shadowBlur = 0;
+
+        // Connecting Packet Transmission Arcs
+        ctx.beginPath();
+        ctx.moveTo(hostX, hostY);
+        ctx.quadraticCurveTo(cx, cy - 60, targetX, targetY);
+        ctx.strokeStyle = "rgba(0, 242, 254, 0.25)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Animate Traveling Packets
+        packetsList.forEach(p => {
+            p.progress += isTestActive ? p.speed * 2.5 : p.speed;
+            if (p.progress > 1) p.progress = 0;
+
+            const t = p.progress;
+            const px = (1 - t) * (1 - t) * hostX + 2 * (1 - t) * t * cx + t * t * targetX;
+            const py = (1 - t) * (1 - t) * hostY + 2 * (1 - t) * t * (cy - 60) + t * t * targetY;
+
+            ctx.beginPath();
+            ctx.arc(px, py, 4, 0, Math.PI * 2);
+            ctx.fillStyle = p.direction === 1 ? "#00f2fe" : "#00e676";
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = 12;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        });
+
+        globeAnimFrameId = requestAnimationFrame(draw);
+    }
+    draw();
+}
+
+// ==========================================================================
+// 5-LEVEL LATENCY GAUGE METER RENDERER
+// ==========================================================================
+
+// Single source of truth for tier classification. Used by the gauge, the
+// distribution panel endpoint dots, and the in-panel status badge.
+// Returns: { tier, label, cssTier, gaugePct, color, emoji }
+function classifyTier(rttMs) {
+    if (rttMs < 100)  return { tier: "fast", label: "FAST",     cssTier: "fast",     gaugePct: (rttMs / 100) * 0.2,    color: "#00e676", emoji: "⚡" };
+    if (rttMs < 250)  return { tier: "good", label: "GOOD",     cssTier: "good",     gaugePct: 0.2 + ((rttMs - 100) / 150) * 0.2, color: "#69f0ae", emoji: "🟢" };
+    if (rttMs < 500)  return { tier: "avg",  label: "AVERAGE",  cssTier: "average",  gaugePct: 0.4 + ((rttMs - 250) / 250) * 0.2, color: "#ffd600", emoji: "🟡" };
+    if (rttMs < 1000) return { tier: "slow", label: "SLOW",     cssTier: "slow",     gaugePct: 0.6 + ((rttMs - 500) / 500) * 0.2, color: "#ff9100", emoji: "🟠" };
+    return                  { tier: "poor", label: "POOR",     cssTier: "poor",     gaugePct: 0.8 + Math.min(0.2, ((rttMs - 1000) / 1000) * 0.2), color: "#ff1744", emoji: "🔴" };
+}
+
+function renderGaugeMeter(rttMs) {
+    const canvas = document.getElementById("gaugeCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const cx = canvas.width / 2;
+    const cy = canvas.height - 15;
+    const radius = 100;
+    const lineWidth = 18;
+
+    // 5-Level Color Scale Segments (PI to 2*PI semi-circle)
+    const segments = [
+        { label: "Fast", color: "#00e676", endPct: 0.2 },
+        { label: "Good", color: "#69f0ae", endPct: 0.4 },
+        { label: "Average", color: "#ffd600", endPct: 0.6 },
+        { label: "Slow", color: "#ff9100", endPct: 0.8 },
+        { label: "Poor", color: "#ff1744", endPct: 1.0 }
+    ];
+
+    let startAngle = Math.PI;
+    segments.forEach(s => {
+        const endAngle = Math.PI + (s.endPct * Math.PI);
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, startAngle, endAngle);
+        ctx.lineWidth = lineWidth;
+        ctx.strokeStyle = s.color;
+        ctx.lineCap = "butt";
+        ctx.stroke();
+        startAngle = endAngle;
+    });
+
+    // Classify via the shared helper and use its gaugePct for needle angle.
+    const cls = classifyTier(rttMs);
+    const needleAngle = Math.PI + (cls.gaugePct * Math.PI);
+
+    // Draw Needle Pointer
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(needleAngle);
+
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(radius - 12, 0);
+    ctx.lineTo(0, 4);
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 8;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fillStyle = "#00f2fe";
+    ctx.fill();
+    ctx.restore();
+
+    // Update Status Badge Element (now in the distribution panel header)
+    const badgeEl = document.getElementById("latencyStatusBadge");
+    if (badgeEl) {
+        badgeEl.className = `latency-badge tier-${cls.cssTier}`;
+        badgeEl.innerText = `${cls.emoji} ${cls.label} (${rttMs.toFixed(1)} ms)`;
+    }
+}
+
+// ==========================================================================
+// HTTP REST LATENCY DISTRIBUTION PANEL RENDERER
+// ==========================================================================
+// Updates the tri-stat row (best / avg / worst), the tier-segmented range
+// bar (min endpoint, avg marker, max endpoint), the variance/spread row,
+// and the per-stat tier chips. Re-uses classifyTier() for color coding.
+function renderDistributionPanel(min, avg, max) {
+    const safeMin = +min || 0;
+    const safeAvg = +avg || 0;
+    const safeMax = +max || 0;
+
+    // ---- Tri-stat values ----
+    // Distinguish "no measurement yet" (all three values are exactly 0) from
+    // a genuine zero. The previous render unfortunately showed "0.0 ms / FAST"
+    // on a fresh tab, misleadingly implying sub-millisecond perfect latency.
+    const noData = safeMin === 0 && safeAvg === 0 && safeMax === 0;
+    const setVal = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = noData ? "-- ms" : `${v.toFixed(1)} ms`;
+    };
+    setVal("httpBestVal",  safeMin);
+    setVal("httpAvgVal",   safeAvg);
+    setVal("httpWorstVal", safeMax);
+
+    // ---- Per-stat tier chips ----
+    const cls = (v) => classifyTier(v);
+    const setTierChip = (id, classification) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (noData) {
+            el.dataset.tier = "fast";
+            el.innerText = "--";
+            el.style.color = "";
+            el.style.borderColor = "";
+            el.style.background = "";
+        } else {
+            el.dataset.tier = classification.tier;
+            el.innerText = `${classification.emoji} ${classification.label}`;
+            el.style.color = classification.color;
+            el.style.borderColor = classification.color;
+            el.style.background = classification.color + "1f"; // ~12% alpha hex suffix
+        }
+    };
+    setTierChip("httpBestTier",  cls(safeMin));
+    setTierChip("httpAvgTier",   cls(safeAvg));
+    setTierChip("httpWorstTier", cls(safeMax));
+
+    // ---- Range bar geometry ----
+    // The bar's tier boundaries stay anchored to absolute ms values (0, 100,
+    // 250, 500, 1000) and the right edge extends up to max(practicalScale,
+    // actualMax * 1.05) so spikes that exceed 1s stay visually placed at
+    // their real position rather than clamped.
+    const TIER_BOUNDS = [0, 100, 250, 500, 1000];
+    const practicalScale = 2000; // base right edge when nothing exceeds it
+    const rightEdge = Math.max(practicalScale, safeMax * 1.05, ...TIER_BOUNDS.slice(-1));
+    const toPct = (v) => Math.max(0, Math.min(100, (v / rightEdge) * 100));
+
+    // Tier-segmented gradient that mirrors the gauge's color scale.
+    // Each tier occupies [segBounds[i].bound, segBounds[i+1].bound] and is
+    // emitted as a pair of stops with the *same color*, so the boundary between
+    // two tiers is a hard color edge with no interpolation. All stops are
+    // monotonically ascending in percent.
+    const tierColors = { fast: "#00e676", good: "#69f0ae", avg: "#ffd600", slow: "#ff9100", poor: "#ff1744" };
+    const segBounds = [ // (bound, cssTier)
+        [TIER_BOUNDS[0], "fast"],  // 0
+        [TIER_BOUNDS[1], "good"],  // 100
+        [TIER_BOUNDS[2], "avg"],   // 250
+        [TIER_BOUNDS[3], "slow"],  // 500
+        [TIER_BOUNDS[4], "poor"],  // 1000
+        [rightEdge,      "poor"],  // rightEdge (>= 2000)
+    ];
+    const stops = [];
+    for (let i = 0; i < segBounds.length - 1; i++) {
+        const [start, startTier] = segBounds[i];
+        const [end,   endTier  ] = segBounds[i + 1];
+        const startPct = (start / rightEdge) * 100;
+        const endPct   = (end   / rightEdge) * 100;
+        stops.push(`${tierColors[startTier]} ${startPct.toFixed(2)}%`);
+        stops.push(`${tierColors[startTier]} ${endPct.toFixed(2)}%`);
+    }
+    const fill = document.getElementById("rangeBarTierFill");
+    if (fill) {
+        fill.style.background = `linear-gradient(to right, ${stops.join(", ")})`;
+        fill.style.opacity = "0.85";
+    }
+
+    // Min endpoint dot (positioned by min's actual value; tier-colored by cls)
+    const minDot = document.getElementById("rangeBarMin");
+    const maxDot = document.getElementById("rangeBarMax");
+    const avgMark = document.getElementById("rangeBarAvg");
+    if (noData) {
+        // Park the markers at the corners and dim them so an empty panel
+        // doesn't look like a measurable worst-case result.
+        if (minDot)  { minDot.style.left = "0%";   minDot.dataset.tier = "none"; minDot.style.opacity = "0.3"; }
+        if (maxDot)  { maxDot.style.left = "100%"; maxDot.dataset.tier = "none"; maxDot.style.opacity = "0.3"; }
+        if (avgMark) { avgMark.style.left = "0%";  avgMark.style.opacity = "0.3"; }
+    } else {
+        if (minDot)  { minDot.style.left = `${toPct(safeMin).toFixed(2)}%`; minDot.dataset.tier = cls(safeMin).tier; minDot.style.opacity = ""; }
+        if (maxDot)  { maxDot.style.left = `${toPct(safeMax).toFixed(2)}%`; maxDot.dataset.tier = cls(safeMax).tier; maxDot.style.opacity = ""; }
+        // Avg marker (cyan triangle)
+        if (avgMark) { avgMark.style.left = `${toPct(safeAvg).toFixed(2)}%`; avgMark.style.opacity = ""; }
+    }
+
+    // ---- Spread & stability ----
+    const spread = Math.max(0, safeMax - safeMin);
+    const ratio  = safeMin > 0 ? (safeMax / safeMin) : 0;
+    const spreadValEl = document.getElementById("distSpreadVal");
+    const ratioEl = document.getElementById("distSpreadRatio");
+    const dotsEl = document.getElementById("distStabilityDots");
+
+    if (noData) {
+        if (spreadValEl) spreadValEl.innerText = "-- ms";
+        if (ratioEl)     ratioEl.innerText = "(--\u00d7 worse)";
+        if (dotsEl) {
+            dotsEl.innerText = "\u25cb\u25cb\u25cb\u25cb\u25cb";
+            dotsEl.style.color = "";
+            dotsEl.title = "Stability: no measurement yet";
+            dotsEl.setAttribute("aria-label", "Stability: no measurement yet");
+        }
+    } else {
+        const fillTier = cls(safeAvg).color;
+        if (spreadValEl) spreadValEl.innerText = `${spread.toFixed(1)} ms`;
+        if (ratioEl) {
+            if (ratio < 1.01) ratioEl.innerText = "(negligible)";
+            else ratioEl.innerText = `(${ratio.toFixed(2)}\u00d7 worse)`;
+        }
+
+        // Stability = relative spread (max-min)/avg. Five anchored buckets so
+        // the dots are stable across runs. <0.10 = "rock-solid", >2.00 = "chaotic".
+        const relSpread = safeAvg > 0 ? spread / safeAvg : 0;
+        let filled;
+        if      (relSpread < 0.10) filled = 5;
+        else if (relSpread < 0.50) filled = 4;
+        else if (relSpread < 1.00) filled = 3;
+        else if (relSpread < 2.00) filled = 2;
+        else                       filled = 1;
+
+        const stabilityWords = ["", "chaotic", "jittery", "moderate", "stable", "very stable"];
+        const word = stabilityWords[filled] || "moderate";
+        const dots = "\u25cf".repeat(filled) + "\u25cb".repeat(5 - filled);
+        if (dotsEl) {
+            dotsEl.innerText = dots;
+            dotsEl.style.color = fillTier;
+            dotsEl.title = `Stability: ${word} (relative spread ${relSpread.toFixed(2)})`;
+            // Screen-reader-friendly text alternative. The dots are decoration;
+            // the meaning is in this label.
+            dotsEl.setAttribute("aria-label", `Stability: ${word} (${filled} of 5)`);
+        }
+    }
+}
+
+// ==========================================================================
+// LIVE LATENCY BENCHMARK RUNNER
+// ==========================================================================
+async function runLatencyTest() {
+    const btn = document.getElementById("btnRunLatencyTest");
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="pulse-dot"></span> Benchmarking CLOB Latency...`;
+    isTestActive = true;
+
+    try {
+        const resp = await fetch("/api/measure_latency?t=" + Date.now());
+        if (!resp.ok) throw new Error("API response error");
+        const data = await resp.json();
+
+        const httpStats = data.latency?.http_rtt_ms || { avg: 0, min: 0, max: 0 };
+        const wsStats = data.latency?.ws_rtt_ms || { avg: 0, ok: false };
+
+        // ----- HTTP REST LATENCY DISTRIBUTION PANEL (best / avg / worst on a bar) -----
+        renderDistributionPanel(httpStats.min, httpStats.avg, httpStats.max);
+
+        // ----- WebSocket card (server-side via real PING/PONG frames) -----
+        const wsCard = document.getElementById("kpiWsAvg");
+        if (wsCard) {
+            if (wsStats.ok === false) {
+                wsCard.innerText = "-- ms (unavailable)";
+                wsCard.title = `WebSocket measurement unavailable: ${wsStats.error || 'no successful pings'} (${wsStats.url || ''})`;
+            } else {
+                const wsAvg = wsStats.avg || 0;
+                const wsCompleted = wsStats.samples_completed || 0;
+                const wsAttempted = wsStats.samples_attempted || 0;
+                wsCard.innerText = `${wsAvg.toFixed(1)} ms`;
+                wsCard.title = `${wsCompleted}/${wsAttempted} ping samples completed; ${wsStats.url || ''}`;
+            }
+        }
+
+        // Update Gauge Needle (it shares classifyTier() with the dist panel)
+        renderGaugeMeter(httpStats.avg);
+
+        // Update Slippage Table
+        const m5Slippage = data.markets?.["5m_markets"]?.slippage_pct || {};
+        const m15Slippage = data.markets?.["15m_markets"]?.slippage_pct || {};
+        const sizes = ["$10", "$25", "$50", "$100", "$250"];
+
+        let html = "";
+        const tooltipByTier = {
+            clean: '<strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em>',
+            low: '<strong>Low Friction.</strong> VWAP impact 0.01%&ndash;0.30%. Small premium &mdash; cents on the dollar for a $100 bankroll, well within tolerance.',
+            med: '<strong>Moderate Friction.</strong> VWAP impact &gt; 0.30%. The orderbook is thin. Consider sizing down or waiting for a deeper book before copying this size.'
+        };
+        const ariaByTier = {
+            clean: 'Zero Friction, VWAP impact under 0.01 percent.',
+            low: 'Low Friction, VWAP impact 0.01 to 0.30 percent.',
+            med: 'Moderate Friction, VWAP impact greater than 0.30 percent.'
+        };
+        sizes.forEach(size => {
+            const v5 = m5Slippage[size] ?? 0;
+            const v15 = m15Slippage[size] ?? 0;
+            const maxVal = Math.max(v5, v15);
+            let badgeHtml, tipKey;
+            if (maxVal > 0.3) { badgeHtml = '<span class="friction-badge badge-med" role="img" aria-label="' + ariaByTier.med + '">Moderate Friction</span>'; tipKey = 'med'; }
+            else if (maxVal > 0.0) { badgeHtml = '<span class="friction-badge badge-low" role="img" aria-label="' + ariaByTier.low + '">Low Friction</span>'; tipKey = 'low'; }
+            else { badgeHtml = '<span class="friction-badge badge-clean" role="img" aria-label="' + ariaByTier.clean + '">Zero Friction</span>'; tipKey = 'clean'; }
+
+            html += `
+                <tr>
+                    <td class="size-col">${size}.00</td>
+                    <td>${v5.toFixed(2)}%</td>
+                    <td>${v15.toFixed(2)}%</td>
+                    <td><span class="friction-badge-wrapper" tabindex="0" role="group">${badgeHtml}<span class="friction-tooltip" role="tooltip">${tooltipByTier[tipKey]}</span></span></td>
+                </tr>
+            `;
+        });
+        document.getElementById("slippageTableBody").innerHTML = html;
+
+        document.getElementById("lblLastTested").innerText = `Last Tested: ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+        console.error("Latency benchmark error:", err);
+        alert("Benchmark test failed: " + err.message);
+    } finally {
+        isTestActive = false;
+        btn.disabled = false;
+        btn.innerHTML = `<span class="btn-icon">⚡</span> Run Live Benchmark Test`;
+    }
+}
+

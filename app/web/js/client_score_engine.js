@@ -102,6 +102,14 @@ function calculateBankrollOptimizedScore(metrics, userCapital = 100.0) {
     score += invScore;
     breakdown["9. Continuous Sizing Fit ($25 Peak) (5%)"] = Number(invScore.toFixed(2));
 
+    // 10. High Entry Price Risk Penalty (Avg Buy Price > $0.85)
+    const avgBuyPrice = parseFloat(metrics.buy_price ?? metrics.avg_buy_price ?? 0.0);
+    if (avgBuyPrice > 0.85) {
+        const buyPenalty = Math.min(10.0, 10.0 * ((avgBuyPrice - 0.85) / (0.99 - 0.85)));
+        score = Math.max(0.0, score - buyPenalty);
+        breakdown["10. High Entry Penalty (> $0.85 Avg Buy)"] = -Number(buyPenalty.toFixed(2));
+    }
+
     const finalScore = Number(score.toFixed(2));
 
     let grade = "";

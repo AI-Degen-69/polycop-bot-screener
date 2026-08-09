@@ -19,6 +19,12 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def translate_path(self, path):
         clean_path = path.split('?')[0]
         
@@ -94,6 +100,95 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(f'{{"error": "{str(e)}"}}'.encode('utf-8'))
             return
 
+        # API endpoint to run live latency and slippage benchmark
+        if parsed.path.startswith('/api/measure_latency'):
+            try:
+                from tools.measure_latency_slippage import (
+                    discover_markets, measure_http_rtt, measure_ws_rtt, profile_timeframe
+                )
+                import time
+                import datetime
+
+                start_time = time.monotonic()
+                TOTAL_BUDGET = 14.0
+                is_partial = False
+
+                def remaining_budget():
+                    return max(0.0, TOTAL_BUDGET - (time.monotonic() - start_time))
+
+                markets = discover_markets()
+                probe_token = ""
+                if markets.get("5m"):
+                    probe_token = markets["5m"][0]["token_id"]
+                elif markets.get("15m"):
+                    probe_token = markets["15m"][0]["token_id"]
+
+                latency_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
+                ws_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
+                profile_5m = {}
+                profile_15m = {}
+
+                if remaining_budget() > 0.5:
+                    latency_stats = measure_http_rtt(probe_token, samples=3)
+                else:
+                    is_partial = True
+
+                if remaining_budget() > 0.5:
+                    ws_stats = measure_ws_rtt(samples=3)
+                else:
+                    is_partial = True
+
+                if remaining_budget() > 0.5:
+                    profile_5m = profile_timeframe(markets.get("5m", []), "5m")
+                else:
+                    is_partial = True
+
+                if remaining_budget() > 0.5:
+                    profile_15m = profile_timeframe(markets.get("15m", []), "15m")
+                else:
+                    is_partial = True
+
+                payload = {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "partial": is_partial or (time.monotonic() - start_time) >= TOTAL_BUDGET,
+                    "latency": {
+                        "http_rtt_ms": latency_stats,
+                        "ws_rtt_ms": {
+                            "avg": ws_stats.get("avg", 0.0),
+                            "min": ws_stats.get("min", 0.0),
+                            "max": ws_stats.get("max", 0.0),
+                            "ok": ws_stats.get("ok", False),
+                            "error": ws_stats.get("error", ""),
+                            "samples_completed": ws_stats.get("samples_completed", 0),
+                            "samples_attempted": ws_stats.get("samples_attempted", 0),
+                            "url": ws_stats.get("url", "")
+                        }
+                    },
+                    "markets": {
+                        "5m_markets": profile_5m,
+                        "15m_markets": profile_15m
+                    }
+                }
+                payload_bytes = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(payload_bytes)))
+                self.end_headers()
+                self.wfile.write(payload_bytes)
+            except Exception as e:
+                err_bytes = json.dumps({"error": str(e)}).encode("utf-8")
+                try:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Length", str(len(err_bytes)))
+                    self.end_headers()
+                    self.wfile.write(err_bytes)
+                except Exception:
+                    pass
+            return
+
         # Default root handler
         if parsed.path == '/' or parsed.path == '':
             self.path = '/index.html'
@@ -103,12 +198,13 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
 def start_server(port=PORT):
     os.chdir(WEB_DIR)
     socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", port), PolyCopScreenerWebHandler) as httpd:
-        print(f"=== PolyCop Bot Screener Running on http://localhost:{port} ===")
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\nServer stopped.")
+    server_address = ("", port)
+    httpd = http.server.ThreadingHTTPServer(server_address, PolyCopScreenerWebHandler)
+    print(f"=== PolyCop Bot Screener Running on http://localhost:{port} ===")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
 
 if __name__ == "__main__":
     start_server(PORT)

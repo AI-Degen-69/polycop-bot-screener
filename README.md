@@ -100,11 +100,27 @@ polycop-bot-screener/
 
 ## 🧪 Running Tests
 
-To run the automated unit test suite:
+The suite mixes `unittest` classes and plain pytest functions, so it must be run with pytest. Run the full offline suite:
 
 ```bash
-python -m unittest discover tests
+python -m pytest tests/ --ignore=tests/verify_web_app_live.py -k "not test_proxy_latency_discovery"
+# or using npm / pnpm:
+npm test
 ```
+
+`tests/verify_web_app_live.py` is a live end-to-end verifier, excluded above because it requires a
+running server. To run it, start the app in one terminal and the verifier in another:
+
+```bash
+python screen.py --serve-only
+```
+
+```bash
+python tests/verify_web_app_live.py
+```
+
+> **Note:** `python -m unittest discover tests` collects only the `unittest`-class tests and silently
+> skips the pytest-style ones. Use pytest. Requires `pytest` installed (`pip install pytest`).
 
 ---
 
