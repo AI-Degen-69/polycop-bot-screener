@@ -88,6 +88,15 @@ header {
 
 .badge-gem:hover { transform: scale(1.05); border-color: #f0abfc; box-shadow: 0 0 16px rgba(236, 72, 153, 0.6); }
 
+.badge-high-buy {
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid #f59e0b; color: #fbbf24; font-size: 0.78rem; font-weight: 700;
+    padding: 0.25rem 0.6rem; border-radius: 6px; display: inline-flex; align-items: center;
+    gap: 0.25rem; margin-left: 0.4rem; cursor: help; box-shadow: 0 0 10px rgba(245, 158, 11, 0.3); transition: all 0.25s ease;
+}
+
+.badge-high-buy:hover { transform: scale(1.05); border-color: #fbbf24; box-shadow: 0 0 16px rgba(245, 158, 11, 0.5); }
+
 /* --- SPARKLING DIAMOND BORDER ANIMATIONS --- */
 @keyframes diamondSparkleBorder {
     0% { background-position: 0% 50%; }
@@ -260,12 +269,39 @@ header {
 }
 .nav-btn:hover { border-color: var(--accent-cyan); background: var(--bg-card-hover); }
 
-.modal-backtest-link {
-    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple)); color: #fff;
-    text-decoration: none; font-size: 0.85rem; font-weight: 700; padding: 0.6rem 1.2rem; border-radius: 8px;
-    display: inline-flex; align-items: center; gap: 0.4rem; box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); transition: all 0.25s ease;
+.btn-copy-addr {
+    background: var(--bg-card-hover); border: 1px solid var(--border-color);
+    color: var(--text-main); font-size: 0.78rem; font-weight: 600; padding: 0.25rem 0.6rem;
+    border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 0.3rem;
 }
-.modal-backtest-link:hover { transform: translateY(-2px); box-shadow: 0 0 25px rgba(139, 92, 246, 0.5); }
+.btn-copy-addr:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+.btn-copy-addr.copied { border-color: var(--tier-s); color: var(--tier-s); }
+
+.btn-copy-mini {
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color);
+    color: var(--text-muted); font-size: 0.75rem; padding: 0.15rem 0.4rem;
+    border-radius: 4px; cursor: pointer; transition: all 0.2s ease;
+}
+.btn-copy-mini:hover { border-color: var(--accent-cyan); color: #ffffff; background: rgba(6, 182, 212, 0.2); }
+.btn-copy-mini.copied { border-color: var(--tier-s); color: var(--tier-s); }
+
+.modal-backtest-link {
+    text-decoration: none; font-size: 0.85rem; font-weight: 700; padding: 0.55rem 1.1rem; border-radius: 8px;
+    display: inline-flex; align-items: center; gap: 0.4rem; transition: all 0.25s ease; color: #ffffff;
+}
+.modal-backtest-link:hover { transform: translateY(-2px); }
+
+.link-polymarket {
+    background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+    border: 1px solid #60a5fa; box-shadow: 0 0 12px rgba(37, 99, 235, 0.3);
+}
+.link-polymarket:hover { box-shadow: 0 0 20px rgba(59, 130, 246, 0.6); }
+
+.link-polycop {
+    background: linear-gradient(135deg, #0284c7, #7c3aed);
+    border: 1px solid #c084fc; box-shadow: 0 0 12px rgba(124, 58, 237, 0.3);
+}
+.link-polycop:hover { box-shadow: 0 0 20px rgba(168, 85, 247, 0.6); }
 
 .modal-scores-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
 @media(max-width: 900px) { .modal-scores-row { grid-template-columns: repeat(3, 1fr); } }

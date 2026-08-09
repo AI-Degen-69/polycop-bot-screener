@@ -1,6 +1,7 @@
 let allTargets = [];
 let filteredTargets = [];
 let currentModalIndex = 0;
+let currentModalAddr = "";
 let radarChartInstance = null;
 let showGemsOnly = false;
 
@@ -23,7 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadDataset() {
     try {
-        const resp = await fetch("/data/phase2_verified_targets.json");
+        const resp = await fetch("/data/phase2_verified_targets.json?t=" + Date.now(), { cache: "no-store" });
         if (!resp.ok) throw new Error("Dataset file not found");
         const data = await resp.json();
         allTargets = data.verified_targets || [];
@@ -126,13 +127,33 @@ function renderGrid() {
         const isGem = t.is_hidden_gem;
         const cardClass = isGem ? "wallet-card card-gem" : "wallet-card";
         const nameInfo = formatTraderName(t);
-        const subAddrHtml = nameInfo.subText ? `<div class="wallet-card-addr">${nameInfo.subText}</div>` : '';
+        const subAddrHtml = nameInfo.subText ? `
+            <div class="wallet-card-addr-row" style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                <div class="wallet-card-addr">${nameInfo.subText}</div>
+                <button class="btn-copy-mini" onclick="copyAddressToClipboard(event, '${t.address}')" title="Copy address to clipboard">📋</button>
+            </div>
+        ` : `
+            <div class="wallet-card-addr-row" style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                <button class="btn-copy-mini" onclick="copyAddressToClipboard(event, '${t.address}')" title="Copy address to clipboard">📋 Copy Address</button>
+            </div>
+        `;
         const gemBadgeHtml = isGem ? `
             <div class="badge-gem-wrapper">
                 <span class="badge-gem">💎 GEM</span>
                 <div class="gem-tooltip-text">
                     <strong>💎 Hidden Gem Detected!</strong><br>
                     PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
+                </div>
+            </div>
+        ` : '';
+
+        const buyPrice = t.metrics ? (t.metrics.buy_price || 0.0) : 0.0;
+        const highBuyBadgeHtml = buyPrice > 0.85 ? `
+            <div class="badge-high-buy-wrapper" style="display:inline-block;">
+                <span class="badge-high-buy">⚠️ High Buy ($${buyPrice.toFixed(2)})</span>
+                <div class="gem-tooltip-text" style="border-color: #f59e0b;">
+                    <strong>⚠️ High Entry Price Warning ($${buyPrice.toFixed(2)})!</strong><br>
+                    This trader buys at $0.85–$0.99 (Dust Yield Farming). Set <strong>Max Price: 0.95</strong> in backtest controls!
                 </div>
             </div>
         ` : '';
@@ -144,6 +165,7 @@ function renderGrid() {
                         <div class="wallet-card-name">
                             ${nameInfo.title}
                             ${gemBadgeHtml}
+                            ${highBuyBadgeHtml}
                         </div>
                         ${subAddrHtml}
                     </div>
@@ -179,6 +201,8 @@ function openModal(idx) {
     const target = filteredTargets[idx];
     if (!target) return;
 
+    currentModalAddr = target.address;
+
     const modal = document.getElementById("detailModal");
     const modalContainer = modal.querySelector(".modal-container");
     
@@ -191,7 +215,10 @@ function openModal(idx) {
     document.getElementById("modalGradeBadge").innerText = target.grade;
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
     document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
-    document.getElementById("modalBacktestLink").href = `https://polycop.fun/profile/${target.address}`;
+    
+    // Set correct external profile & platform links
+    document.getElementById("modalPolymarketLink").href = `https://polymarket.com/@${target.address}`;
+    document.getElementById("modalPolyCopLink").href = `https://polycop.fun/copy-backtest_${target.address}`;
 
     const plRatio = target.metrics.pl_ratio || 0;
     let plColor = "#10b981";
@@ -211,6 +238,23 @@ function openModal(idx) {
     renderRadarChart(target);
 
     modal.classList.add("active");
+}
+
+function copyAddressToClipboard(event, address) {
+    if (event) event.stopPropagation();
+    if (!address) return;
+    navigator.clipboard.writeText(address).then(() => {
+        const btn = event.currentTarget || event.target;
+        const origHtml = btn.innerHTML;
+        btn.innerHTML = "✓ Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => {
+            btn.innerHTML = origHtml;
+            btn.classList.remove("copied");
+        }, 1500);
+    }).catch(err => {
+        console.error("Clipboard write failed:", err);
+    });
 }
 
 function closeModal() {
@@ -331,57 +375,39 @@ async function startLeaderboardScan() {
 
     overlay.classList.add("active");
     logFeed.innerHTML = "=== STARTING AUTOMATED POLYCOP LEADERBOARD SCAN ===<br>";
-    progressFill.style.width = "5%";
+    logFeed.innerHTML += "Executing Python Phase 1 & Phase 2 Pipeline on backend...<br>";
+    progressFill.style.width = "25%";
 
     try {
-        logFeed.innerHTML += "Fetching page 1 of PolyCop Leaderboard...<br>";
-        const resp = await fetch("/api/leaderboard?page=1&page_size=100&full=1");
-        if (!resp.ok) throw new Error("Leaderboard API returned status " + resp.status);
+        logFeed.innerHTML += "Scraping PolyCop leaderboard API and screening wallets against hard gates...<br>";
+        progressFill.style.width = "50%";
+
+        const resp = await fetch("/api/rescan");
+        if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.error || `Server returned status ${resp.status}`);
+        }
+
         const data = await resp.json();
-        const profiles = data.data || [];
-
-        logFeed.innerHTML += `Fetched ${profiles.length} leaderboard profiles.<br>`;
-        progressFill.style.width = "40%";
-
-        const verified = [];
-        profiles.forEach((p, i) => {
-            const rawMetrics = {
-                actual_pnl: parseFloat(p.pnl || 0.0),
-                copy_pnl: parseFloat(p.copy_backtest_pnl || p.copy_pnl || -1.0),
-                slippage: parseFloat(p.slippage || 0.0),
-                hedged_pct: parseFloat(p.hedged_percentage || 0.0),
-                pl_ratio: parseFloat(p.avg_profit_loss_ratio || 0.0),
-                days_win_rate: parseFloat(p.daily_green_rate || 0.0),
-                r20_win_rate: parseFloat(p.recent_20_win_rate || 0.0),
-                r20_pnl: parseFloat(p.recent_20_pnl || 0.0),
-                r20_slip: parseFloat(p.recent_20_slippage || 0.0),
-                pnl_vol_ratio: parseFloat(p.pnl_to_volume_ratio || 0.0),
-                avg_invest: parseFloat(p.avg_invest || 0.0),
-                markets: parseInt(p.markets_traded || 0),
-                polycop_site_score: parseFloat(p.score || p.polycop_score || 0.0)
-            };
-
-            const auditRes = calculateBankrollOptimizedScore(rawMetrics, 100.0);
-            if (auditRes.rejection_reasons.length === 0) {
-                const isGem = rawMetrics.polycop_site_score < 75 && auditRes.final_score >= 80.0;
-                verified.push({
-                    address: p.address,
-                    name: p.name || p.username || `Trader (${p.address.slice(0, 6)}...)`,
-                    final_score: auditRes.final_score,
-                    grade: auditRes.grade,
-                    is_hidden_gem: isGem,
-                    metrics: rawMetrics,
-                    breakdown: auditRes.breakdown,
-                    bankroll_analysis: auditRes.bankroll_analysis
-                });
-            }
-        });
+        allTargets = data.verified_targets || [];
 
         progressFill.style.width = "90%";
-        logFeed.innerHTML += `Screening complete! <strong>${verified.length} verified targets PASS 100% of hard rejection gates.</strong><br>`;
-        
-        allTargets = verified;
-        updateSummaryHeader({ total_scraped_profiles: profiles.length });
+        logFeed.innerHTML += `Screening complete! <strong>${allTargets.length} verified targets PASS 100% of hard rejection gates.</strong><br>`;
+        logFeed.innerHTML += `Dataset successfully saved to disk (app/data/phase2_verified_targets.json).<br>`;
+        logFeed.scrollTop = logFeed.scrollHeight;
+
+        // Reset gems filter so user sees all targets immediately
+        if (showGemsOnly) {
+            showGemsOnly = false;
+            const btn = document.getElementById("btnToggleGem");
+            if (btn) {
+                btn.classList.remove("active");
+                const labelSpan = btn.querySelector(".btn-label");
+                if (labelSpan) labelSpan.innerHTML = '💎 Hidden Gems Only';
+            }
+        }
+
+        updateSummaryHeader(data);
         filterAndRender();
 
         progressFill.style.width = "100%";
@@ -404,10 +430,7 @@ async function clearScanData() {
         const resp = await fetch("/api/clear_data");
         const data = await resp.json();
         alert(data.message || "Data cache cleared.");
-        allTargets = [];
-        updateSummaryHeader({});
-        filterAndRender();
-        await loadDataset();
+        window.location.reload();
     } catch (e) {
         alert("Failed to clear scan data: " + e.message);
     }

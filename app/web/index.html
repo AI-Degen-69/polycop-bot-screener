@@ -78,14 +78,18 @@
                         <span class="header-score-badge badge-polycop" id="modalPolyCopScore">68 / 100 Site</span>
                         <span class="header-score-badge" id="modalGradeBadge">S-Tier</span>
                     </div>
-                    <div class="wallet-card-addr" id="modalAddr">0x0000...0000</div>
+                    <div class="modal-addr-row" style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+                        <div class="wallet-card-addr" id="modalAddr">0x0000...0000</div>
+                        <button class="btn-copy-addr" id="btnCopyModalAddr" onclick="copyAddressToClipboard(event, currentModalAddr)" title="Copy full address to clipboard">📋 Copy Address</button>
+                    </div>
                     <div class="modal-nav-controls">
                         <button class="nav-btn" onclick="navigateModal(-1)">◄ Previous Target</button>
                         <button class="nav-btn" onclick="navigateModal(1)">Next Target ►</button>
                     </div>
                 </div>
-                <div>
-                    <a href="#" target="_blank" id="modalBacktestLink" class="modal-backtest-link">📈 View Profile on PolyCop ↗</a>
+                <div class="modal-header-links" style="display: flex; flex-direction: column; gap: 8px; align-items: flex-end;">
+                    <a href="#" target="_blank" id="modalPolymarketLink" class="modal-backtest-link link-polymarket">📊 Polymarket Profile ↗</a>
+                    <a href="#" target="_blank" id="modalPolyCopLink" class="modal-backtest-link link-polycop">📈 PolyCop Copy Backtest ↗</a>
                 </div>
             </div>
 

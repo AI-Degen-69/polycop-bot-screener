@@ -2,8 +2,26 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.coverage
 
-# Environment
+# Data files (scraped targets & temporary dumps)
+app/data/*.json
+!app/data/.gitkeep
+
+# Environment & logs
 .env
+.env.*
+*.log
 venv/
 ENV/
+.venv/
+
+# IDE & OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/

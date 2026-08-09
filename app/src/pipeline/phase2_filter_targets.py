@@ -57,7 +57,8 @@ def run_phase2_filter():
             "pnl_vol_ratio": float(p.get("roi", p.get("pnl_to_volume_ratio", p.get("pnl_vol_ratio", 0.0)))),
             "avg_invest": float(p.get("avg_invest", 0.0)),
             "markets": int(p.get("markets_traded", p.get("markets", 0))),
-            "polycop_site_score": float(p.get("polycop_site_score", p.get("score", 0.0)))
+            "polycop_site_score": float(p.get("polycop_site_score", p.get("score", 0.0))),
+            "buy_price": float(p.get("buy_price", p.get("avg_buy_price", 0.0)))
         }
 
         audit_res = calculate_bankroll_optimized_score(raw_metrics, user_capital=100.0)

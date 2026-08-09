@@ -60,6 +60,32 @@ Never analyze PolyCop metrics in isolation. Every action depends on the **4-Laye
 
 ---
 
+## Official Setup Copy Trade Workflow (Telegram Bot)
+
+### Quick Start (5 Steps)
+1. **Target Wallet**: Enter the target wallet address (`0x...`) to copy.
+2. **Tag**: Assign a custom label for easy tracking (e.g. `Target-1-A-Tier`).
+3. **Copy Percentage / Fixed Amount**:
+   - **Percentage Scale**: `Your Trade Value = Target Trade Value × Copy %` (Recommended: `3%`).
+   - **Fixed Amount**: Every copied trade buys a fixed USD amount (e.g. `$50`).
+4. **Configure Optional Risk Settings**: Adjust limit vs market execution, minimum floor handling, and trade thresholds.
+5. **Confirm**: Tap `Confirm` to activate the copy-trading task.
+
+### Optional Settings & Parameter Invariants
+- **Limit / Market Order Copy Buy**:
+  - **Market Orders**: Executed immediately via FAK (Fill-and-Kill).
+  - **Limit Orders**: Placed at target's price with 2 optional controls:
+    - *Duration*: Auto-cancels the limit order after a set timeframe.
+    - *Price Offset*: Places your limit order a fixed amount above/below target price.
+- **Below Min Limit, Buy at Min**:
+  - *Enabled (Recommended)*: If your calculated copy trade falls below minimum ($1.00 for market orders, 5 shares for limit orders), it automatically buys at minimum instead of skipping.
+- **Ignore Target Wallet Trades Under**:
+  - Filters out target's test/dust trades below a specified USD value (e.g. ignore trades under `$25.00`).
+- **TP/SL (Take Profit / Stop Loss)**:
+  - Sets automated exit targets. *Note*: TP/SL does not execute when sell orders use limit orders.
+
+---
+
 ## Quick Reference Command Cheatsheet
 
 | Command | Systemic Purpose |

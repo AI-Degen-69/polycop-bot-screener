@@ -146,6 +146,13 @@ def calculate_bankroll_optimized_score(metrics, user_capital=100.0):
     score += inv_score
     breakdown["9. Continuous Sizing Fit ($25 Peak) (5%)"] = round(inv_score, 2)
 
+    # 10. High Entry Price Risk Penalty (Avg Buy Price > $0.85)
+    avg_buy_price = float(metrics.get("buy_price", metrics.get("avg_buy_price", 0.0)))
+    if avg_buy_price > 0.85:
+        buy_penalty = min(10.0, 10.0 * ((avg_buy_price - 0.85) / (0.99 - 0.85)))
+        score = max(0.0, score - buy_penalty)
+        breakdown["10. High Entry Penalty (> $0.85 Avg Buy)"] = -round(buy_penalty, 2)
+
     final_score = round(score, 2)
     
     if len(rejection_reasons) > 0:
