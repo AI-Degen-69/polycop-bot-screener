@@ -58,12 +58,13 @@ source_repo: https://github.com/AI-Degen-69/polycop-bot-screener
 
 ## Action
 
-Use camelCase naming convention
+Use snake_case for file names (Python modules and web assets alike)
 
 ## Evidence
 
-- Analyzed file naming patterns in repository
-- Dominant pattern: camelCase
+- 18 tracked `.py` files, all snake_case: `phase1_scrape_leaderboard.py`, `score_wallets.py`, `serve_web_app.py`, `measure_latency_slippage.py`
+- The 2 tracked `.js` files follow the same convention: `app.js`, `client_score_engine.js`
+- No camelCase file names exist in the repository
 
 ---
 id: polycop-bot-screener-import-relative
@@ -78,12 +79,15 @@ source_repo: https://github.com/AI-Degen-69/polycop-bot-screener
 
 ## Action
 
-Use relative imports for project files
+Use absolute package imports for project modules, rooted at the top-level
+package name. Never use relative imports.
 
 ## Evidence
 
-- Import analysis shows relative import pattern
-- Example: import { x } from '../lib/x'
+- Cross-module imports are all absolute: `from screener.activity import ...`,
+  `from screener.score_wallets import ...`, `from tools.measure_latency_slippage import ...`
+- No relative import (`from .x` / `from ..x`) appears anywhere in the repository
+- Standard-library imports stay plain: `import json`, `import os`, `import sys`
 
 ---
 id: polycop-bot-screener-export-style
@@ -98,12 +102,16 @@ source_repo: https://github.com/AI-Degen-69/polycop-bot-screener
 
 ## Action
 
-Prefer named exports
+Expose module-level functions directly. Prefix internal helpers with a single
+leading underscore. Do not declare `__all__` and do not re-export through
+`__init__.py`.
 
 ## Evidence
 
-- Export pattern analysis
-- Dominant style: named
+- No `__all__` declaration anywhere in the repository
+- Every `__init__.py` is a one-line comment only, with no re-exports
+- `app/src/screener/activity.py` exposes `parse_timestamp`, `bucket_for_hours`,
+  `compute_activity`, `summarize_buckets` and keeps `_load_daily_stats` private
 
 ---
 id: polycop-bot-screener-test-separate
@@ -118,12 +126,17 @@ source_repo: https://github.com/AI-Degen-69/polycop-bot-screener
 
 ## Action
 
-Place tests in the tests/ or __tests__/ directory, mirroring src structure
+Place every test in the flat top-level `tests/` directory. Do not mirror the
+`app/src/` package layout with nested subdirectories, and do not create
+`__tests__/` folders.
 
 ## Evidence
 
-- Separate test directory pattern detected
-- Tests live in dedicated test folders
+- `tests/` holds all test files flat: `test_activity.py`, `test_score_wallets.py`,
+  `test_measure_latency_slippage.py`, `test_proxy_server_latency.py`
+- Source lives in nested packages (`app/src/screener/`, `app/src/pipeline/`,
+  `tools/`) but `tests/` has no matching subdirectories
+- No `__tests__/` directory exists in the repository
 
 ---
 id: polycop-bot-screener-test-naming
@@ -138,12 +151,16 @@ source_repo: https://github.com/AI-Degen-69/polycop-bot-screener
 
 ## Action
 
-Name test files using the pattern: *.test.ts
+Name test files `test_<module>.py`, mirroring the module under test
 
 ## Evidence
 
-- File pattern: *.test.ts
-- Consistent across test files
+- All test files use the pytest prefix pattern: `tests/test_activity.py`,
+  `tests/test_score_wallets.py`, `tests/test_measure_latency_slippage.py`,
+  `tests/test_proxy_server_latency.py`
+- Each name mirrors its target module (`screener/activity.py`,
+  `screener/score_wallets.py`, `tools/measure_latency_slippage.py`)
+- No `*.test.ts` files exist in the repository
 
 ---
 id: polycop-bot-screener-workflow-feature-development
