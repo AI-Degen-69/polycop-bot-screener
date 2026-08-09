@@ -1,5 +1,6 @@
 :root {
     --bg-main: #0b0f19;
+    --bg-dark: #0b0f19;
     --bg-card: #111827;
     --bg-card-hover: #1f2937;
     --border-color: #1f2937;
@@ -20,7 +21,8 @@ body {
     background-color: var(--bg-main);
     color: var(--text-main);
     font-family: 'Outfit', sans-serif;
-    padding: 2rem;
+    padding: 0;
+    margin: 0;
     min-height: 100vh;
 }
 
@@ -390,13 +392,16 @@ header {
 }
 
 .app-sidebar {
-    width: 240px;
-    background: rgba(13, 17, 23, 0.95);
+    width: 250px;
+    background: #0d1117;
     border-right: 1px solid rgba(255, 255, 255, 0.08);
     display: flex;
     flex-direction: column;
     padding: 1.5rem 1rem;
     position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
     height: 100vh;
     z-index: 100;
     backdrop-filter: blur(10px);
@@ -420,13 +425,14 @@ header {
     flex: 1;
 }
 
-.sidebar-nav .nav-item {
+.sidebar-nav .nav-item,
+.sidebar-nav button.nav-item {
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 0.75rem 1rem;
-    background: transparent;
-    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
     color: var(--text-muted);
     font-family: inherit;
@@ -435,16 +441,23 @@ header {
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: left;
+    width: 100%;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
 }
 
-.sidebar-nav .nav-item:hover {
-    background: rgba(255, 255, 255, 0.04);
+.sidebar-nav .nav-item:hover,
+.sidebar-nav button.nav-item:hover {
+    background: rgba(255, 255, 255, 0.08);
     color: #fff;
+    border-color: rgba(255, 255, 255, 0.2);
 }
 
-.sidebar-nav .nav-item.active {
+.sidebar-nav .nav-item.active,
+.sidebar-nav button.nav-item.active {
     background: rgba(0, 242, 254, 0.12);
-    border-color: rgba(0, 242, 254, 0.3);
+    border-color: #00f2fe;
     color: var(--accent-cyan);
     box-shadow: 0 0 15px rgba(0, 242, 254, 0.15);
 }
@@ -472,10 +485,11 @@ header {
 }
 
 .app-main-content {
-    margin-left: 240px;
+    margin-left: 250px;
     flex: 1;
-    padding: 2rem;
-    max-width: 1400px;
+    padding: 2rem 2.5rem;
+    min-height: 100vh;
+    width: calc(100% - 250px);
 }
 
 .page-view {
