@@ -11,58 +11,222 @@
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <div class="header-title">
-                <h1>PolyCop Bot Screener</h1>
-                <p>Continuous 100-Point Audit Engine &bull; $100 Bankroll Optimized &bull; Zero Toxic HFT Bots</p>
+    <div class="app-layout">
+        <!-- SIDEBAR NAVIGATION -->
+        <aside class="app-sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-icon">🛡️</span>
+                <span class="brand-name">PolyCop</span>
             </div>
-            <div class="header-stats">
-                <div class="stat-pill">
-                    <div class="val" id="statTotalScanned">0</div>
-                    <div class="lbl">Total Scanned</div>
+            <nav class="sidebar-nav">
+                <button class="nav-item active" id="navScreener" onclick="switchTab('screener')">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Trader Screener</span>
+                </button>
+                <button class="nav-item" id="navLatency" onclick="switchTab('latency')">
+                    <span class="nav-icon">⚡</span>
+                    <span class="nav-text">Latency & Slippage</span>
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="footer-status"><span class="status-dot"></span> CLOB Node: Online</div>
+                <div class="footer-version">v1.2.0 • $100 Engine</div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="app-main-content">
+            <!-- PAGE 1: TRADER SCREENER -->
+            <div id="pageScreener" class="page-view active">
+                <header>
+                    <div class="header-title">
+                        <h1>PolyCop Bot Screener</h1>
+                        <p>Continuous 100-Point Audit Engine &bull; $100 Bankroll Optimized &bull; Zero Toxic HFT Bots</p>
+                    </div>
+                    <div class="header-stats">
+                        <div class="stat-pill">
+                            <div class="val" id="statTotalScanned">0</div>
+                            <div class="lbl">Total Scanned</div>
+                        </div>
+                        <div class="stat-pill">
+                            <div class="val" id="statVerified">0</div>
+                            <div class="lbl">Verified PASS</div>
+                        </div>
+                        <div class="stat-pill">
+                            <div class="val" id="statSTier">0</div>
+                            <div class="lbl">S-Tier (≥90)</div>
+                        </div>
+                        <div class="stat-pill stat-pill-gem">
+                            <div class="val" id="statGems">0</div>
+                            <div class="lbl">Hidden Gems</div>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="search-bar">
+                    <input type="text" id="searchInput" class="search-input" placeholder="Search by name or address (0x...)...">
+                    <select id="sortSelect" class="sort-select">
+                        <option value="score-desc">Sort by: Highest Screener Score</option>
+                        <option value="score-asc">Sort by: Lowest Screener Score</option>
+                        <option value="pnl-desc">Sort by: Highest Copy PnL</option>
+                        <option value="wr-desc">Sort by: Highest Win Rate</option>
+                        <option value="polycop-desc">Sort by: Highest PolyCop Site Score</option>
+                    </select>
+                    <button id="btnToggleGem" class="btn-toggle-gem">
+                        <span class="btn-label">💎 Hidden Gems Only</span>
+                        <span class="gem-info-bubble-wrapper">
+                            <span class="gem-info-bubble">ℹ️</span>
+                            <span class="gem-info-card">
+                                <strong>💎 How Hidden Gems Are Identified:</strong><br>
+                                Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
+                            </span>
+                        </span>
+                    </button>
+                    <button id="btnStartScan" class="btn-scan">⚡ Scan Leaderboard API</button>
+                    <button id="btnClearData" class="btn-clear-data">🗑️ Clear Data</button>
                 </div>
-                <div class="stat-pill">
-                    <div class="val" id="statVerified">0</div>
-                    <div class="lbl">Verified PASS</div>
-                </div>
-                <div class="stat-pill">
-                    <div class="val" id="statSTier">0</div>
-                    <div class="lbl">S-Tier (≥90)</div>
-                </div>
-                <div class="stat-pill stat-pill-gem">
-                    <div class="val" id="statGems">0</div>
-                    <div class="lbl">Hidden Gems</div>
+
+                <div class="wallets-grid" id="walletsGrid">
+                    <!-- Grid cards populated dynamically -->
                 </div>
             </div>
-        </header>
 
-        <div class="search-bar">
-            <input type="text" id="searchInput" class="search-input" placeholder="Search by name or address (0x...)...">
-            <select id="sortSelect" class="sort-select">
-                <option value="score-desc">Sort by: Highest Screener Score</option>
-                <option value="score-asc">Sort by: Lowest Screener Score</option>
-                <option value="pnl-desc">Sort by: Highest Copy PnL</option>
-                <option value="wr-desc">Sort by: Highest Win Rate</option>
-                <option value="polycop-desc">Sort by: Highest PolyCop Site Score</option>
-            </select>
-            <button id="btnToggleGem" class="btn-toggle-gem">
-                <span class="btn-label">💎 Hidden Gems Only</span>
-                <span class="gem-info-bubble-wrapper">
-                    <span class="gem-info-bubble">ℹ️</span>
-                    <span class="gem-info-card">
-                        <strong>💎 How Hidden Gems Are Identified:</strong><br>
-                        Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
-                    </span>
-                </span>
-            </button>
-            <button id="btnStartScan" class="btn-scan">⚡ Scan Leaderboard API</button>
-            <button id="btnClearData" class="btn-clear-data">🗑️ Clear Data</button>
-        </div>
+            <!-- PAGE 2: LATENCY & SLIPPAGE PROFILER -->
+            <div id="pageLatency" class="page-view">
+                <div class="latency-header">
+                    <div>
+                        <h2>⚡ Polymarket Latency & Slippage Profiler</h2>
+                        <p class="subtitle">Live network latency RTT & orderbook VWAP slippage engine for 5-min & 15-min prediction markets</p>
+                    </div>
+                    <div class="geo-banner">
+                        <div class="geo-node">
+                            <span class="geo-label">HOST LOCATION:</span>
+                            <span class="geo-val">Client Node (Local ISP)</span>
+                        </div>
+                        <div class="geo-arrow">➔</div>
+                        <div class="geo-node">
+                            <span class="geo-label">POLYMARKET TARGET:</span>
+                            <span class="geo-val">CLOB Edge Gateway (US-East AWS)</span>
+                        </div>
+                    </div>
+                </div>
 
-        <div class="wallets-grid" id="walletsGrid">
-            <!-- Grid cards populated dynamically -->
-        </div>
+                <!-- TOP VISUAL ROW: GLOBE PACKET CANVAS & 5-LEVEL GAUGE METER -->
+                <div class="visual-row">
+                    <!-- ANIMATED PACKET GLOBE CARD -->
+                    <div class="profiler-card globe-card">
+                        <div class="card-header">
+                            <span class="card-icon">🌐</span>
+                            <h3>Live Request Packet Topology</h3>
+                            <span class="live-indicator"><span class="pulse-dot"></span> PACKET STREAM</span>
+                        </div>
+                        <div class="canvas-wrapper">
+                            <canvas id="globeCanvas" width="550" height="220"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 5-LEVEL LATENCY GAUGE METER CARD -->
+                    <div class="profiler-card gauge-card">
+                        <div class="card-header">
+                            <span class="card-icon">⏱️</span>
+                            <h3>5-Tier Latency Gauge Meter</h3>
+                            <span id="latencyStatusBadge" class="latency-badge tier-average">🟡 AVERAGE</span>
+                        </div>
+                        <div class="gauge-canvas-wrapper">
+                            <canvas id="gaugeCanvas" width="340" height="170"></canvas>
+                        </div>
+                        <!-- 5-STAGE COLOR SCALE LEGEND -->
+                        <div class="scale-legend">
+                            <div class="legend-step step-fast"><span class="step-dot"></span> Fast (&lt;100ms)</div>
+                            <div class="legend-step step-good"><span class="step-dot"></span> Good (&lt;250ms)</div>
+                            <div class="legend-step step-avg"><span class="step-dot"></span> Avg (&lt;500ms)</div>
+                            <div class="legend-step step-slow"><span class="step-dot"></span> Slow (&lt;1s)</div>
+                            <div class="legend-step step-poor"><span class="step-dot"></span> Poor (&ge;1s)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ACTIONS & KPI MATRIX ROW -->
+                <div class="latency-action-bar">
+                    <button id="btnRunLatencyTest" class="btn-run-latency" onclick="runLatencyTest()">
+                        <span class="btn-icon">⚡</span> Run Live Benchmark Test
+                    </button>
+                    <div class="last-tested-lbl" id="lblLastTested">Last Tested: Ready for benchmark</div>
+                </div>
+
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-val" id="kpiHttpAvg">-- ms</div>
+                        <div class="kpi-lbl">HTTP REST Avg RTT</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-val" id="kpiHttpMin">-- ms</div>
+                        <div class="kpi-lbl">HTTP REST Min RTT</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-val" id="kpiHttpMax">-- ms</div>
+                        <div class="kpi-lbl">HTTP REST Max RTT</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-val" id="kpiWsAvg">-- ms</div>
+                        <div class="kpi-lbl">Est. WebSocket RTT</div>
+                    </div>
+                </div>
+
+                <!-- ORDERBOOK SLIPPAGE MATRIX TABLE -->
+                <div class="profiler-card table-card">
+                    <div class="card-header">
+                        <span class="card-icon">📊</span>
+                        <h3>Order Book VWAP Slippage Matrix</h3>
+                        <span class="table-subtext">Evaluated across live Polymarket 5m & 15m binary outcome orderbooks</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="slippage-table" id="slippageMatrixTable">
+                            <thead>
+                                <tr>
+                                    <th>Bankroll Trade Size</th>
+                                    <th>5-Min Market Slippage %</th>
+                                    <th>15-Min Market Slippage %</th>
+                                    <th>Copy-Trade Friction Rating</th>
+                                </tr>
+                            </thead>
+                            <tbody id="slippageTableBody">
+                                <tr>
+                                    <td class="size-col">$10.00</td>
+                                    <td>0.00%</td>
+                                    <td>0.00%</td>
+                                    <td><span class="friction-badge badge-clean">Zero Friction</span></td>
+                                </tr>
+                                <tr>
+                                    <td class="size-col">$25.00</td>
+                                    <td>0.00%</td>
+                                    <td>0.00%</td>
+                                    <td><span class="friction-badge badge-clean">Zero Friction</span></td>
+                                </tr>
+                                <tr>
+                                    <td class="size-col">$50.00</td>
+                                    <td>0.00%</td>
+                                    <td>0.00%</td>
+                                    <td><span class="friction-badge badge-clean">Zero Friction</span></td>
+                                </tr>
+                                <tr>
+                                    <td class="size-col">$100.00</td>
+                                    <td>0.00%</td>
+                                    <td>0.17%</td>
+                                    <td><span class="friction-badge badge-low">Low Friction</span></td>
+                                </tr>
+                                <tr>
+                                    <td class="size-col">$250.00</td>
+                                    <td>0.25%</td>
+                                    <td>0.41%</td>
+                                    <td><span class="friction-badge badge-med">Moderate Friction</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
 
     <!-- DETAIL MODAL DIALOG -->
