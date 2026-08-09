@@ -21,9 +21,21 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest requests websockets
+
+    # The suite mixes unittest classes and plain pytest functions; `unittest discover`
+    # silently skips the latter, so pytest is required to collect everything.
+    # Excluded here:
+    #   - verify_web_app_live.py        requires a locally running server on port 8050
+    #   - test_proxy_latency_discovery  hits the live Polymarket API (non-deterministic in CI)
     - name: Run Unit Tests
       run: |
-        python -m unittest discover tests
+        python -m pytest tests/ -v \
+          --ignore=tests/verify_web_app_live.py \
+          --deselect tests/test_proxy_server_latency.py::test_proxy_latency_discovery
 
     - name: Verify Web App Entry Point
       run: |
