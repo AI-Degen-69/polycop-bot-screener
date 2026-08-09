@@ -14,6 +14,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from screener.score_wallets import calculate_bankroll_optimized_score
+from screener.activity import compute_activity, parse_timestamp, summarize_buckets
 
 def run_phase2_filter():
     """
@@ -32,6 +33,10 @@ def run_phase2_filter():
 
     raw_profiles = data.get("profiles", [])
     print(f"=== PHASE 2: FILTERING & SCORING {len(raw_profiles)} PROFILES ===")
+
+    # Age recency against the scrape instant, not against read time, so a
+    # cached dataset never claims a trader went quiet while it sat on disk.
+    scrape_now = parse_timestamp(data.get("timestamp"))
 
     verified_targets = []
     rejected_count = 0
@@ -91,8 +96,10 @@ def run_phase2_filter():
                 "avg_invest": round(raw_metrics["avg_invest"], 2),
                 "markets": raw_metrics["markets"],
                 "r20_pnl": round(raw_metrics["r20_pnl"], 2),
-                "r20_slip": round(raw_metrics["r20_slip"], 2)
+                "r20_slip": round(raw_metrics["r20_slip"], 2),
+                "buy_price": round(raw_metrics["buy_price"], 4)
             },
+            "activity": compute_activity(p, now=scrape_now),
             "breakdown": audit_res["breakdown"],
             "bankroll_analysis": audit_res["bankroll_analysis"]
         }
@@ -116,6 +123,7 @@ def run_phase2_filter():
         "s_tier_count": len(s_tier),
         "a_tier_count": len(a_tier),
         "hidden_gems_count": len(gems),
+        "activity_buckets": summarize_buckets([t["activity"] for t in verified_targets]),
         "verified_targets": verified_targets
     }
 
@@ -129,6 +137,7 @@ def run_phase2_filter():
     print(f"  |-- S-Tier (>= 90 Pts): {len(s_tier)}")
     print(f"  |-- A-Tier (80-89 Pts): {len(a_tier)}")
     print(f"  +-- Hidden Gems: {len(gems)}")
+    print(f"Activity buckets: {summary_data['activity_buckets']}")
     print(f"Saved verified feed to: {out_file}")
     return out_file
 

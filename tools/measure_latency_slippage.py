@@ -1,12 +1,22 @@
 """Polymarket Live Latency & Slippage Profiler."""
 
 import argparse
+import asyncio
 import datetime
 import json
 import os
 import re
 import time
 import requests
+
+try:
+    import websockets  # type: ignore
+    _HAS_WEBSOCKETS = True
+except ImportError:
+    _HAS_WEBSOCKETS = False
+
+# Public Polymarket WebSocket subscription endpoint (orderbook stream).
+POLYMARKET_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
 TRADE_SIZES = [10.0, 25.0, 50.0, 100.0, 250.0]
 
@@ -65,7 +75,7 @@ def fetch_active_clob_tokens() -> list:
     url = "https://clob.polymarket.com/sampling-simplified-markets"
     tokens = []
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=3)
         if resp.status_code == 200:
             data = resp.json().get("data", [])
             for m in data:
@@ -131,11 +141,11 @@ def discover_markets() -> dict:
     tokens = fetch_active_clob_tokens()
     if tokens:
         items = [{"title": f"CLOB Active Token {t[:10]}", "token_id": t} for t in tokens]
-        return {"5m": items[:15], "15m": items[15:30]}
+        return {"5m": items[:5], "15m": items[5:10]}
 
     url = "https://gamma-api.polymarket.com/markets?limit=100&active=true&closed=false&order=volume24hr&dir=desc"
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=3)
         if resp.status_code == 200:
             markets = resp.json()
             return filter_prediction_markets(markets)
@@ -147,31 +157,82 @@ def discover_markets() -> dict:
 def fetch_orderbook(token_id: str) -> dict:
     url = f"https://clob.polymarket.com/book?token_id={token_id}"
     try:
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(url, timeout=2)
         if resp.status_code == 200:
             return resp.json()
     except Exception:
         pass
     return {"asks": [], "bids": []}
 
-def measure_http_rtt(token_id: str, samples: int = 5) -> dict:
+def measure_http_rtt(token_id: str, samples: int = 3) -> dict:
     url = f"https://clob.polymarket.com/book?token_id={token_id}"
     rtts = []
     for _ in range(samples):
         start = time.perf_counter()
         try:
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url, timeout=2)
             if resp.status_code == 200:
                 rtts.append((time.perf_counter() - start) * 1000.0)
         except Exception:
             pass
-        time.sleep(0.05)
+        time.sleep(0.02)
     if not rtts:
         return {"avg": 0.0, "min": 0.0, "max": 0.0}
     return {
         "avg": round(sum(rtts) / len(rtts), 2),
         "min": round(min(rtts), 2),
         "max": round(max(rtts), 2)
+    }
+
+async def _measure_ws_rtt_async(url: str, samples: int, connect_timeout: float, ping_timeout: float) -> list:
+    rtts = []
+    # NOTE: We do NOT wrap the connect() in try/except here. Letting handshake
+    # errors (DNS / network / TLS / 4xx / 5xx) propagate to the outer caller is
+    # intentional — measure_ws_rtt() catches them and surfaces a useful error
+    # string instead of silently masking it as "no successful pings".
+    async with websockets.connect(url, open_timeout=connect_timeout, close_timeout=2) as ws:
+        for _ in range(samples):
+            try:
+                start = time.perf_counter()
+                # `ping()` returns an awaitable that resolves when the
+                # matching PONG frame returns from the server.
+                await asyncio.wait_for(ws.ping(), timeout=ping_timeout)
+                rtts.append((time.perf_counter() - start) * 1000.0)
+            except asyncio.TimeoutError:
+                # Missed sample — keep trying the rest.
+                pass
+            except Exception:
+                # Mid-loop connection drop, etc. Don't abort the whole run.
+                pass
+            await asyncio.sleep(0.02)
+    return rtts
+
+def measure_ws_rtt(samples: int = 3, connect_timeout: float = 5.0, ping_timeout: float = 3.0) -> dict:
+    """Real WebSocket ping/pong round-trip to the Polymarket CLOB stream.
+
+    Measures actual frame-level RTT (not the previous 40%-of-HTTP heuristic).
+    Falls back to {avg:0, min:0, max:0} with ok=False if the library is
+    unavailable, the handshake fails, or all pings time out.
+    """
+    empty = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": None,
+             "samples_completed": 0, "samples_attempted": samples, "url": POLYMARKET_WS_URL}
+    if not _HAS_WEBSOCKETS:
+        return {**empty, "error": "websockets library not installed"}
+    try:
+        rtts = asyncio.run(_measure_ws_rtt_async(POLYMARKET_WS_URL, samples, connect_timeout, ping_timeout))
+    except Exception as e:
+        return {**empty, "error": f"{type(e).__name__}: {e}"}
+    if not rtts:
+        return {**empty, "samples_completed": 0}
+    return {
+        "avg": round(sum(rtts) / len(rtts), 2),
+        "min": round(min(rtts), 2),
+        "max": round(max(rtts), 2),
+        "ok": True,
+        "error": None,
+        "samples_completed": len(rtts),
+        "samples_attempted": samples,
+        "url": POLYMARKET_WS_URL,
     }
 
 def profile_timeframe(markets: list, timeframe_label: str) -> dict:
@@ -181,7 +242,7 @@ def profile_timeframe(markets: list, timeframe_label: str) -> dict:
     aggregated_slippage = {s: [] for s in TRADE_SIZES}
     sampled_count = 0
 
-    for m in markets:
+    for m in markets[:3]:
         book = fetch_orderbook(m["token_id"])
         asks = book.get("asks", [])
         if not asks:
@@ -190,7 +251,7 @@ def profile_timeframe(markets: list, timeframe_label: str) -> dict:
         for size in TRADE_SIZES:
             res = calculate_vwap_slippage(asks, size)
             aggregated_slippage[size].append(res["slippage_pct"])
-        if sampled_count >= 5:
+        if sampled_count >= 3:
             break
 
     slippage_summary = {}
@@ -225,6 +286,15 @@ def main():
     print("[*] Measuring REST API latency (RTT)...")
     latency_stats = measure_http_rtt(probe_token, samples=args.samples)
 
+    print("[*] Measuring WebSocket ping/pong RTT to wss://ws-subscriptions-clob...")
+    ws_stats = measure_ws_rtt(samples=args.samples)
+
+    if ws_stats["ok"]:
+        print(f"[*] WS ping RTT: Avg {ws_stats['avg']} ms | Min {ws_stats['min']} ms | Max {ws_stats['max']} ms "
+              f"({ws_stats['samples_completed']}/{ws_stats['samples_attempted']} samples completed)")
+    else:
+        print(f"[!] WS ping unavailable: {ws_stats['error'] or 'no successful pings'}")
+
     print("[*] Profiling live orderbook volume slippage...")
     profile_5m = profile_timeframe(markets["5m"], "5m")
     profile_15m = profile_timeframe(markets["15m"], "15m")
@@ -233,7 +303,16 @@ def main():
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "latency": {
             "http_rtt_ms": latency_stats,
-            "ws_rtt_ms": {"avg": round(latency_stats["avg"] * 0.4, 2), "min": round(latency_stats["min"] * 0.4, 2), "max": round(latency_stats["max"] * 0.4, 2)}
+            "ws_rtt_ms": {
+                "avg": ws_stats["avg"],
+                "min": ws_stats["min"],
+                "max": ws_stats["max"],
+                "ok": ws_stats["ok"],
+                "error": ws_stats["error"],
+                "samples_completed": ws_stats["samples_completed"],
+                "samples_attempted": ws_stats["samples_attempted"],
+                "url": ws_stats["url"]
+            }
         },
         "markets": {
             "5m_markets": profile_5m,
@@ -245,6 +324,9 @@ def main():
     print(" POLYMARKET LIVE LATENCY & SLIPPAGE PROFILE")
     print("=" * 65)
     print(f"HTTP Latency (RTT): Avg {latency_stats['avg']} ms | Min {latency_stats['min']} ms | Max {latency_stats['max']} ms")
+    if ws_stats["ok"]:
+        print(f"WS PING RTT      : Avg {ws_stats['avg']} ms | Min {ws_stats['min']} ms | Max {ws_stats['max']} ms "
+              f"({ws_stats['url']})")
     print("-" * 65)
     print(f"{'Trade Size':<12} | {'5-Min Market Slippage':<22} | {'15-Min Market Slippage':<22}")
     print("-" * 65)

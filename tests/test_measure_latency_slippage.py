@@ -45,3 +45,21 @@ def test_filter_prediction_markets():
     assert len(categorized["5m"]) == 1
     assert len(categorized["15m"]) == 1
     assert categorized["5m"][0]["token_id"] == "token1"
+
+def test_measure_ws_rtt_shape():
+    """Verify shape: avg/min/max numeric, ok/error/samples_* fields, url is the documented WS endpoint.
+
+    Use a deliberately short timeout so the test stays fast even if the WS server is unreachable.
+    The test does NOT require the WS server to be reachable; it only asserts the response shape.
+    """
+    from tools.measure_latency_slippage import measure_ws_rtt, POLYMARKET_WS_URL
+    res = measure_ws_rtt(samples=1, connect_timeout=0.5, ping_timeout=0.5)
+    assert "avg" in res and isinstance(res["avg"], (int, float))
+    assert "min" in res and isinstance(res["min"], (int, float))
+    assert "max" in res and isinstance(res["max"], (int, float))
+    assert "ok" in res and isinstance(res["ok"], bool)
+    assert "samples_completed" in res and isinstance(res["samples_completed"], int)
+    assert "samples_attempted" in res and isinstance(res["samples_attempted"], int)
+    assert "url" in res
+    assert res["url"] == POLYMARKET_WS_URL
+    assert POLYMARKET_WS_URL.startswith("wss://ws-subscriptions-clob.polymarket.com")

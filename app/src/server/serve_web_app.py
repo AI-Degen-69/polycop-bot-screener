@@ -104,7 +104,7 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
         if parsed.path.startswith('/api/measure_latency'):
             try:
                 from tools.measure_latency_slippage import (
-                    discover_markets, measure_http_rtt, profile_timeframe
+                    discover_markets, measure_http_rtt, measure_ws_rtt, profile_timeframe
                 )
                 import datetime
 
@@ -116,6 +116,7 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
                     probe_token = markets["15m"][0]["token_id"]
 
                 latency_stats = measure_http_rtt(probe_token, samples=3)
+                ws_stats = measure_ws_rtt(samples=3)
                 profile_5m = profile_timeframe(markets.get("5m", []), "5m")
                 profile_15m = profile_timeframe(markets.get("15m", []), "15m")
 
@@ -124,9 +125,14 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
                     "latency": {
                         "http_rtt_ms": latency_stats,
                         "ws_rtt_ms": {
-                            "avg": round(latency_stats["avg"] * 0.4, 2),
-                            "min": round(latency_stats["min"] * 0.4, 2),
-                            "max": round(latency_stats["max"] * 0.4, 2)
+                            "avg": ws_stats["avg"],
+                            "min": ws_stats["min"],
+                            "max": ws_stats["max"],
+                            "ok": ws_stats["ok"],
+                            "error": ws_stats["error"],
+                            "samples_completed": ws_stats["samples_completed"],
+                            "samples_attempted": ws_stats["samples_attempted"],
+                            "url": ws_stats["url"]
                         }
                     },
                     "markets": {
@@ -134,17 +140,24 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
                         "15m_markets": profile_15m
                     }
                 }
+                payload_bytes = json.dumps(payload).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(payload_bytes)))
                 self.end_headers()
-                self.wfile.write(json.dumps(payload).encode("utf-8"))
+                self.wfile.write(payload_bytes)
             except Exception as e:
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(f'{{"error": "{str(e)}"}}'.encode('utf-8'))
+                err_bytes = json.dumps({"error": str(e)}).encode("utf-8")
+                try:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Length", str(len(err_bytes)))
+                    self.end_headers()
+                    self.wfile.write(err_bytes)
+                except Exception:
+                    pass
             return
 
         # Default root handler
@@ -156,12 +169,13 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
 def start_server(port=PORT):
     os.chdir(WEB_DIR)
     socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", port), PolyCopScreenerWebHandler) as httpd:
-        print(f"=== PolyCop Bot Screener Running on http://localhost:{port} ===")
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\nServer stopped.")
+    server_address = ("", port)
+    httpd = http.server.ThreadingHTTPServer(server_address, PolyCopScreenerWebHandler)
+    print(f"=== PolyCop Bot Screener Running on http://localhost:{port} ===")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
 
 if __name__ == "__main__":
     start_server(PORT)

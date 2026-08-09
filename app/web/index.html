@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="/css/styles.css?v=1.2.1">
+    <link rel="stylesheet" href="/css/styles.css?v=1.3.0">
 </head>
 <body>
     <div class="app-layout">
@@ -28,6 +28,38 @@
                     <span class="nav-text">Latency & Slippage</span>
                 </button>
             </nav>
+
+            <!-- RECENT ACTIVITY FILTER PANEL -->
+            <div class="sidebar-filters" id="sidebarFilters">
+                <div class="filter-group-title">🕒 Recent Activity</div>
+                <div class="filter-hint">Last trade seen on the PolyCop leaderboard</div>
+                <div class="activity-filter-list" id="activityFilterList">
+                    <button class="activity-filter active" data-activity="all">
+                        <span class="af-label">Any activity</span><span class="af-count" data-count="all">0</span>
+                    </button>
+                    <button class="activity-filter" data-activity="live">
+                        <span class="af-label">🟢 Live &lt; 6h</span><span class="af-count" data-count="live">0</span>
+                    </button>
+                    <button class="activity-filter" data-activity="today">
+                        <span class="af-label">🟡 Today &lt; 24h</span><span class="af-count" data-count="today">0</span>
+                    </button>
+                    <button class="activity-filter" data-activity="d3">
+                        <span class="af-label">🟠 Last 3 days</span><span class="af-count" data-count="d3">0</span>
+                    </button>
+                    <button class="activity-filter" data-activity="d7">
+                        <span class="af-label">🔴 Last 7 days</span><span class="af-count" data-count="d7">0</span>
+                    </button>
+                </div>
+
+                <div class="filter-group-title">💵 $100 Bankroll Fit</div>
+                <div class="filter-hint">Keeps only targets sized small enough that your $100 bankroll still copies their <em>small</em> trades, not just the big ones</div>
+                <label class="filter-checkbox">
+                    <input type="checkbox" id="chkCopyReady">
+                    <span>Tight sizing only (order floor &le; $25)</span>
+                </label>
+                <button class="btn-reset-filters" id="btnResetFilters">↺ Reset filters</button>
+            </div>
+
             <div class="sidebar-footer">
                 <div class="footer-status"><span class="status-dot"></span> CLOB Node: Online</div>
                 <div class="footer-version">v1.2.0 • $100 Engine</div>
@@ -71,6 +103,8 @@
                         <option value="pnl-desc">Sort by: Highest Copy PnL</option>
                         <option value="wr-desc">Sort by: Highest Win Rate</option>
                         <option value="polycop-desc">Sort by: Highest PolyCop Site Score</option>
+                        <option value="activity-desc">Sort by: Most Recent Activity</option>
+                        <option value="trades7d-desc">Sort by: Most Trades (7d)</option>
                     </select>
                     <button id="btnToggleGem" class="btn-toggle-gem">
                         <span class="btn-label">💎 Hidden Gems Only</span>
@@ -130,7 +164,6 @@
                         <div class="card-header">
                             <span class="card-icon">⏱️</span>
                             <h3>5-Tier Latency Gauge Meter</h3>
-                            <span id="latencyStatusBadge" class="latency-badge tier-average">🟡 AVERAGE</span>
                         </div>
                         <div class="gauge-canvas-wrapper">
                             <canvas id="gaugeCanvas" width="340" height="170"></canvas>
@@ -154,22 +187,75 @@
                     <div class="last-tested-lbl" id="lblLastTested">Last Tested: Ready for benchmark</div>
                 </div>
 
-                <div class="kpi-grid">
-                    <div class="kpi-card">
-                        <div class="kpi-val" id="kpiHttpAvg">-- ms</div>
-                        <div class="kpi-lbl">HTTP REST Avg RTT</div>
+                <div class="latency-stats-row">
+                    <!-- ============= HTTP REST LATENCY DISTRIBUTION PANEL ============= -->
+                    <div class="distribution-panel" tabindex="0" role="group" aria-label="HTTP REST latency distribution: best, average, and worst round-trip times with variance.">
+                        <div class="dist-header">
+                            <span class="dist-icon">🌐</span>
+                            <h3 class="dist-title">HTTP REST Latency Distribution</h3>
+                            <span class="latency-badge-wrapper" tabindex="0" role="group" aria-label="5-tier latency classification badge.">
+                                <span id="latencyStatusBadge" class="latency-badge tier-average">🟡 AVERAGE</span>
+                                <span class="latency-tooltip" role="tooltip">
+                                    <strong>5-Tier Latency Classification.</strong> Live bandwidth between your browser and the Polymarket CLOB, sampled by sending HTTPS GET <em>/book</em> requests. <em>This measures transport speed, not slippage.</em> The tier shown here drives both the range-bar marker pin and the gauge needle &mdash; the same number, two viewpoints.
+                                </span>
+                            </span>
+                        </div>
+
+                        <!-- BEST / AVG / WORST TRI-STAT ROW -->
+                        <div class="tri-stat-row">
+                            <div class="tri-stat tri-stat-best">
+                                <div class="tri-stat-lbl">Best</div>
+                                <div class="tri-stat-val" id="httpBestVal">-- ms</div>
+                                <div class="tri-stat-tier" id="httpBestTier" data-tier="fast">--</div>
+                            </div>
+                            <div class="tri-stat tri-stat-avg">
+                                <div class="tri-stat-lbl">★ Average</div>
+                                <div class="tri-stat-val" id="httpAvgVal">-- ms</div>
+                                <div class="tri-stat-tier" id="httpAvgTier" data-tier="avg">--</div>
+                            </div>
+                            <div class="tri-stat tri-stat-worst">
+                                <div class="tri-stat-lbl">Worst</div>
+                                <div class="tri-stat-val" id="httpWorstVal">-- ms</div>
+                                <div class="tri-stat-tier" id="httpWorstTier" data-tier="poor">--</div>
+                            </div>
+                        </div>
+
+                        <!-- TIER-SEGMENTED RANGE BAR -->
+                        <div class="range-bar-wrapper">
+                            <div class="range-bar-track" aria-hidden="true">
+                                <div class="range-bar-tier-fill" id="rangeBarTierFill"></div>
+                                <div class="range-bar-marker" id="rangeBarAvg" style="left: 0%;"></div>
+                                <div class="range-bar-endpoint" id="rangeBarMin" data-tier="fast" style="left: 0%;"></div>
+                                <div class="range-bar-endpoint" id="rangeBarMax" data-tier="poor" style="left: 100%;"></div>
+                            </div>
+                            <div class="range-bar-axis">
+                                <span>0</span><span>100</span><span>250</span><span>500</span><span>1s</span><span>2s+ ms</span>
+                            </div>
+                            <div class="range-bar-tier-labels">
+                                <span>Fast</span><span>Good</span><span>Avg</span><span>Slow</span><span>Poor</span>
+                            </div>
+                        </div>
+
+                        <!-- SPREAD & VARIANCE -->
+                        <div class="dist-variance-row">
+                            <span>Spread <span class="spread-val" id="distSpreadVal">-- ms</span>
+                                <span id="distSpreadRatio" style="margin-left: 0.4rem; color: var(--text-muted);">(--&times; worse)</span>
+                            </span>
+                            <span>Stability <span class="stability-dots" id="distStabilityDots">&cir;&cir;&cir;&cir;&cir;</span></span>
+                        </div>
+
+                        <div class="tooltip-text" role="tooltip">
+                            <strong>HTTP REST Latency Distribution.</strong> The <em>Best</em>, <em>Average&starf;</em>, and <em>Worst</em> values are samples from live <em>HTTPS GET /book</em> calls to the Polymarket CLOB. The horizontal bar uses the same five-tier color scale as the gauge, so you can read at a glance: <em>where the avg sits</em> (the cyan marker), <em>how good your best case was</em> (left dot), <em>how bad the worst case was</em> (right dot). High <em>Spread</em> with low <em>Stability</em> means the connection is jittery &mdash; every other request is much slower than the quiet ones.
+                        </div>
                     </div>
-                    <div class="kpi-card">
-                        <div class="kpi-val" id="kpiHttpMin">-- ms</div>
-                        <div class="kpi-lbl">HTTP REST Min RTT</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-val" id="kpiHttpMax">-- ms</div>
-                        <div class="kpi-lbl">HTTP REST Max RTT</div>
-                    </div>
-                    <div class="kpi-card">
+
+                    <!-- ============= WEBSOCKET RTT (compact sibling) ============= -->
+                    <div class="kpi-card ws-card" tabindex="0" role="group" aria-label="WebSocket RTT, measured live to ws-subscriptions-clob.polymarket.com.">
                         <div class="kpi-val" id="kpiWsAvg">-- ms</div>
-                        <div class="kpi-lbl">Est. WebSocket RTT</div>
+                        <div class="kpi-lbl">📡 WebSocket RTT</div>
+                        <div class="tooltip-text" role="tooltip">
+                            <strong>WebSocket RTT.</strong> Measured live &mdash; the profiler opens a real RFC-6455 WebSocket to <code>wss://ws-subscriptions-clob.polymarket.com/ws/market</code>, sends protocol PING frames, and times the PONG round-trip across multiple samples. The card&rsquo;s native <code>title</code> shows the run&rsquo;s sample count and the exact URL. <strong>This is the channel Polymarket uses for live orderbook updates</strong>, so its RTT dominates copy-trade freshness more than HTTP REST does. Note: measured <em>server-side</em> (not from your browser).
+                        </div>
                     </div>
                 </div>
 
@@ -180,14 +266,33 @@
                         <h3>Order Book VWAP Slippage Matrix</h3>
                         <span class="table-subtext">Evaluated across live Polymarket 5m & 15m binary outcome orderbooks</span>
                     </div>
+                    <div class="slippage-caption">
+                        <strong>How to read this matrix:</strong> each row is the size of your copy-trade (top of your $100 bankroll). The two % columns are <em>VWAP slippage</em> &mdash; the extra cost you pay to fill the entire trade at the current best ask on the live Polymarket orderbook. <strong>The friction badge on the right is independent of the latency gauge above</strong> &mdash; it only reports depth cost. A green badge with red-tier latency still means your order lands late; the price may have moved before your copy arrives.
+                    </div>
                     <div class="table-responsive">
                         <table class="slippage-table" id="slippageMatrixTable">
                             <thead>
                                 <tr>
-                                    <th>Bankroll Trade Size</th>
-                                    <th>5-Min Market Slippage %</th>
-                                    <th>15-Min Market Slippage %</th>
-                                    <th>Copy-Trade Friction Rating</th>
+                                    <th>Bankroll Trade Size<span class="th-info" tabindex="0" role="button" aria-label="What is bankroll trade size?">?</span>
+                                        <span class="th-tooltip" role="tooltip">
+                                            <strong>Bankroll Trade Size.</strong> Hypothetical per-trade size used to characterize orderbook depth &mdash; this is <em>not</em> what your live bot actually places. The bot copies with about <em>$3 per signal</em> (3% of your $100 bankroll, capped at $5.00). The row sizes here ask: <em>&ldquo;if you traded this much instead, how much extra would you pay?&rdquo;</em>
+                                        </span>
+                                    </th>
+                                    <th>5-Min Market Slippage %<span class="th-info" tabindex="0" role="button" aria-label="What is 5-min market slippage?">?</span>
+                                        <span class="th-tooltip" role="tooltip">
+                                            <strong>5-Min Market Slippage %.</strong> VWAP extra cost on Polymarket&rsquo;s currently-active <em>5-minute</em> prediction markets (typically crypto, but whatever the CLOB has open when the test runs &mdash; sometimes sports/politics). <em>0.00%</em> = fills at the best ask. <em>0.50%</em> = pay $0.005 more per $1 of trade &mdash; i.e. $0.25 extra on a $50 fill.
+                                        </span>
+                                    </th>
+                                    <th>15-Min Market Slippage %<span class="th-info" tabindex="0" role="button" aria-label="What is 15-min market slippage?">?</span>
+                                        <span class="th-tooltip" role="tooltip">
+                                            <strong>15-Min Market Slippage %.</strong> VWAP extra cost on Polymarket&rsquo;s currently-active <em>15-minute</em> prediction markets. Same metric as the 5-min column, but the timer is less frantic &mdash; liquidity usually settles a bit as the resolution window approaches.
+                                        </span>
+                                    </th>
+                                    <th>Copy-Trade Friction Rating<span class="th-info" tabindex="0" role="button" aria-label="What is copy-trade friction rating?">?</span>
+                                        <span class="th-tooltip" role="tooltip">
+                                            <strong>Copy-Trade Friction Rating.</strong> Coarse bucket of the larger of the two slippage % values. <em>Does not include latency.</em> Always cross-reference with the latency gauge above &mdash; this badge only tells you &ldquo;if/when your order arrives, how expensive is it?&rdquo;.
+                                        </span>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody id="slippageTableBody">
@@ -195,31 +300,31 @@
                                     <td class="size-col">$10.00</td>
                                     <td>0.00%</td>
                                     <td>0.00%</td>
-                                    <td><span class="friction-badge badge-clean">Zero Friction</span></td>
+                                    <td><span class="friction-badge badge-clean" tabindex="0" role="img" aria-label="Zero F friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$25.00</td>
                                     <td>0.00%</td>
                                     <td>0.00%</td>
-                                    <td><span class="friction-badge badge-clean">Zero Friction</span></td>
+                                    <td><span class="friction-badge badge-clean" tabindex="0" role="img" aria-label="Zero F friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$50.00</td>
                                     <td>0.00%</td>
                                     <td>0.00%</td>
-                                    <td><span class="friction-badge badge-clean">Zero Friction</span></td>
+                                    <td><span class="friction-badge badge-clean" tabindex="0" role="img" aria-label="Zero F friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$100.00</td>
                                     <td>0.00%</td>
                                     <td>0.17%</td>
-                                    <td><span class="friction-badge badge-low">Low Friction</span></td>
+                                    <td><span class="friction-badge badge-low" tabindex="0" role="img" aria-label="Low Friction, VWAP impact 0.01 to 0.30 percent.">Low Friction</span><span class="friction-tooltip" role="tooltip"><strong>Low Friction.</strong> VWAP impact 0.01%&ndash;0.30%. Small premium &mdash; cents on the dollar for a $100 bankroll, well within tolerance.</span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$250.00</td>
                                     <td>0.25%</td>
                                     <td>0.41%</td>
-                                    <td><span class="friction-badge badge-med">Moderate Friction</span></td>
+                                    <td><span class="friction-badge badge-med" tabindex="0" role="img" aria-label="Moderate Friction, VWAP impact greater than 0.30 percent.">Moderate Friction</span><span class="friction-tooltip" role="tooltip"><strong>Moderate Friction.</strong> VWAP impact &gt; 0.30%. The orderbook is thin. Consider sizing down or waiting for a deeper book before copying this size.</span></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -343,7 +448,7 @@
         </div>
     </div>
 
-    <script src="/js/client_score_engine.js?v=1.2.1"></script>
-    <script src="/js/app.js?v=1.2.1"></script>
+    <script src="/js/client_score_engine.js?v=1.3.0"></script>
+    <script src="/js/app.js?v=1.3.0"></script>
 </body>
 </html>
