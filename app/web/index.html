@@ -19,11 +19,11 @@
                 <span class="brand-name">PolyCop</span>
             </div>
             <nav class="sidebar-nav">
-                <button class="nav-item active" id="navScreener" onclick="switchTab('screener')">
+                <button class="nav-item active" id="navScreener">
                     <span class="nav-icon">📊</span>
                     <span class="nav-text">Trader Screener</span>
                 </button>
-                <button class="nav-item" id="navLatency" onclick="switchTab('latency')">
+                <button class="nav-item" id="navLatency">
                     <span class="nav-icon">⚡</span>
                     <span class="nav-text">Latency & Slippage</span>
                 </button>
@@ -62,7 +62,7 @@
 
             <div class="sidebar-footer">
                 <div class="footer-status"><span class="status-dot"></span> CLOB Node: Online</div>
-                <div class="footer-version">v1.2.0 • $100 Engine</div>
+                <div class="footer-version">v1.3.0 • $100 Engine</div>
             </div>
         </aside>
 
@@ -300,31 +300,31 @@
                                     <td class="size-col">$10.00</td>
                                     <td>0.00%</td>
                                     <td>0.00%</td>
-                                    <td><span class="friction-badge badge-clean" tabindex="0" role="img" aria-label="Zero F friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></td>
+                                    <td><span class="friction-badge-wrapper" tabindex="0" role="group"><span class="friction-badge badge-clean" role="img" aria-label="Zero Friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$25.00</td>
                                     <td>0.00%</td>
                                     <td>0.00%</td>
-                                    <td><span class="friction-badge badge-clean" tabindex="0" role="img" aria-label="Zero F friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></td>
+                                    <td><span class="friction-badge-wrapper" tabindex="0" role="group"><span class="friction-badge badge-clean" role="img" aria-label="Zero Friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$50.00</td>
                                     <td>0.00%</td>
                                     <td>0.00%</td>
-                                    <td><span class="friction-badge badge-clean" tabindex="0" role="img" aria-label="Zero F friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></td>
+                                    <td><span class="friction-badge-wrapper" tabindex="0" role="group"><span class="friction-badge badge-clean" role="img" aria-label="Zero Friction, VWAP impact under 0.01 percent.">Zero Friction</span><span class="friction-tooltip" role="tooltip"><strong>Zero Friction.</strong> VWAP impact &lt; 0.01% &mdash; your trade would fill at or extremely near the best ask. <em>Note: this only covers depth cost; a high-latency run can still let the price move before your order lands.</em></span></span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$100.00</td>
                                     <td>0.00%</td>
                                     <td>0.17%</td>
-                                    <td><span class="friction-badge badge-low" tabindex="0" role="img" aria-label="Low Friction, VWAP impact 0.01 to 0.30 percent.">Low Friction</span><span class="friction-tooltip" role="tooltip"><strong>Low Friction.</strong> VWAP impact 0.01%&ndash;0.30%. Small premium &mdash; cents on the dollar for a $100 bankroll, well within tolerance.</span></td>
+                                    <td><span class="friction-badge-wrapper" tabindex="0" role="group"><span class="friction-badge badge-low" role="img" aria-label="Low Friction, VWAP impact 0.01 to 0.30 percent.">Low Friction</span><span class="friction-tooltip" role="tooltip"><strong>Low Friction.</strong> VWAP impact 0.01%&ndash;0.30%. Small premium &mdash; cents on the dollar for a $100 bankroll, well within tolerance.</span></span></td>
                                 </tr>
                                 <tr>
                                     <td class="size-col">$250.00</td>
                                     <td>0.25%</td>
                                     <td>0.41%</td>
-                                    <td><span class="friction-badge badge-med" tabindex="0" role="img" aria-label="Moderate Friction, VWAP impact greater than 0.30 percent.">Moderate Friction</span><span class="friction-tooltip" role="tooltip"><strong>Moderate Friction.</strong> VWAP impact &gt; 0.30%. The orderbook is thin. Consider sizing down or waiting for a deeper book before copying this size.</span></td>
+                                    <td><span class="friction-badge-wrapper" tabindex="0" role="group"><span class="friction-badge badge-med" role="img" aria-label="Moderate Friction, VWAP impact greater than 0.30 percent.">Moderate Friction</span><span class="friction-tooltip" role="tooltip"><strong>Moderate Friction.</strong> VWAP impact &gt; 0.30%. The orderbook is thin. Consider sizing down or waiting for a deeper book before copying this size.</span></span></td>
                                 </tr>
                             </tbody>
                         </table>

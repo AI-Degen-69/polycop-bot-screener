@@ -106,7 +106,15 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
                 from tools.measure_latency_slippage import (
                     discover_markets, measure_http_rtt, measure_ws_rtt, profile_timeframe
                 )
+                import time
                 import datetime
+
+                start_time = time.monotonic()
+                TOTAL_BUDGET = 14.0
+                is_partial = False
+
+                def remaining_budget():
+                    return max(0.0, TOTAL_BUDGET - (time.monotonic() - start_time))
 
                 markets = discover_markets()
                 probe_token = ""
@@ -115,24 +123,45 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
                 elif markets.get("15m"):
                     probe_token = markets["15m"][0]["token_id"]
 
-                latency_stats = measure_http_rtt(probe_token, samples=3)
-                ws_stats = measure_ws_rtt(samples=3)
-                profile_5m = profile_timeframe(markets.get("5m", []), "5m")
-                profile_15m = profile_timeframe(markets.get("15m", []), "15m")
+                latency_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
+                ws_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
+                profile_5m = {}
+                profile_15m = {}
+
+                if remaining_budget() > 0.5:
+                    latency_stats = measure_http_rtt(probe_token, samples=3)
+                else:
+                    is_partial = True
+
+                if remaining_budget() > 0.5:
+                    ws_stats = measure_ws_rtt(samples=3)
+                else:
+                    is_partial = True
+
+                if remaining_budget() > 0.5:
+                    profile_5m = profile_timeframe(markets.get("5m", []), "5m")
+                else:
+                    is_partial = True
+
+                if remaining_budget() > 0.5:
+                    profile_15m = profile_timeframe(markets.get("15m", []), "15m")
+                else:
+                    is_partial = True
 
                 payload = {
                     "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "partial": is_partial or (time.monotonic() - start_time) >= TOTAL_BUDGET,
                     "latency": {
                         "http_rtt_ms": latency_stats,
                         "ws_rtt_ms": {
-                            "avg": ws_stats["avg"],
-                            "min": ws_stats["min"],
-                            "max": ws_stats["max"],
-                            "ok": ws_stats["ok"],
-                            "error": ws_stats["error"],
-                            "samples_completed": ws_stats["samples_completed"],
-                            "samples_attempted": ws_stats["samples_attempted"],
-                            "url": ws_stats["url"]
+                            "avg": ws_stats.get("avg", 0.0),
+                            "min": ws_stats.get("min", 0.0),
+                            "max": ws_stats.get("max", 0.0),
+                            "ok": ws_stats.get("ok", False),
+                            "error": ws_stats.get("error", ""),
+                            "samples_completed": ws_stats.get("samples_completed", 0),
+                            "samples_attempted": ws_stats.get("samples_attempted", 0),
+                            "url": ws_stats.get("url", "")
                         }
                     },
                     "markets": {

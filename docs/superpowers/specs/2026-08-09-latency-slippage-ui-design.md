@@ -1,7 +1,7 @@
 # Design Spec: Polymarket Latency & Slippage Feature Page
 
 - **Status**: Draft / Pending Approval
-- **Target Files**: `app/web/index.html`, `app/web/css/styles.css`, `app/web/js/app.js`, `app/src/server/proxy_server.py`
+- **Target Files**: `app/web/index.html`, `app/web/css/styles.css`, `app/web/js/app.js`, `app/src/server/serve_web_app.py`
 
 ## Overview
 A dedicated full-feature page within the PolyCop Bot Screener web application accessible via a left sidebar navigation menu. It features live network benchmarking against Polymarket's CLOB servers, an interactive canvas-based globe animation showing packet transmission, host/server geolocation metadata, a 5-level latency gauge meter with Red-Yellow-Green color scaling, and orderbook VWAP slippage matrix tables.

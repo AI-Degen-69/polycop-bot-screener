@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+ Fucking amazing job. You explained well, no bullshit. Love it, subscribed. Really great fucking work. #!/usr/bin/env python3
 import json
 import time
 import os
@@ -36,7 +36,10 @@ def run_phase2_filter():
 
     # Age recency against the scrape instant, not against read time, so a
     # cached dataset never claims a trader went quiet while it sat on disk.
-    scrape_now = parse_timestamp(data.get("timestamp"))
+    raw_ts = data.get("timestamp")
+    scrape_now = parse_timestamp(raw_ts)
+    if raw_ts and scrape_now is None:
+        raise ValueError(f"Unparseable timestamp in Phase 1 scraped data: '{raw_ts}'")
 
     verified_targets = []
     rejected_count = 0

@@ -11,7 +11,7 @@ The Live Latency & Slippage Profiler measures real-time network latency (WebSock
 
 ## 1. System Architecture
 
-```
+```text
 [ Polymarket APIs ]
   │
   ├── Gamma API ──> Discover active 5m / 15m markets
@@ -36,8 +36,8 @@ The Live Latency & Slippage Profiler measures real-time network latency (WebSock
 - **Target Token Count**: Minimum 2 active tokens per timeframe (5m and 15m).
 
 ### 2.2 Latency Benchmark Engine
-- **HTTP REST RTT**: Performs 10 sequential ping requests to `https://clob.polymarket.com/book?token_id=<token_id>` and records min/max/avg latency (ms).
-- **WebSocket RTT**: Establishes connection to `wss://ws-subscriptions-clob.polymarket.com/ws/market`, sends ping frames, and measures message round-trip time over 20 frames.
+- **HTTP REST RTT**: Performs sequential GET requests to `https://clob.polymarket.com/book?token_id=<token_id>` using configurable `--samples` count (default 5) and records min/max/avg latency (ms).
+- **WebSocket RTT**: Establishes connection to `wss://ws-subscriptions-clob.polymarket.com/ws/market`, sends ping frames, and measures message round-trip time over configurable `--samples` count (default 5).
 
 ### 2.3 Slippage Calculation Engine
 For each target trade size $S \in \{\$10, \$25, \$50, \$100, \$250\}$:
@@ -56,8 +56,10 @@ For each target trade size $S \in \{\$10, \$25, \$50, \$100, \$250\}$:
 {
   "timestamp": "2026-08-09T14:55:00Z",
   "latency": {
-    "http_rtt_ms": { "avg": 112.5, "min": 98.0, "max": 145.2 },
-    "ws_rtt_ms": { "avg": 38.4, "min": 32.1, "max": 52.0 }
+    "http_rtt_ms": { "avg": 112.5, "min": 98.0, "max": 145.2, "ok": true, "error": "", "samples_completed": 5, "samples_attempted": 5, "url": "https://clob.polymarket.com/book?token_id=..." },
+    "ws_rtt_ms": { "avg": 38.4, "min": 32.1, "max": 52.0, "ok": true, "error": "", "samples_completed": 5, "samples_attempted": 5, "url": "wss://ws-subscriptions-clob.polymarket.com/ws/market" }
+  }
+}
   },
   "markets": {
     "5m_markets": {

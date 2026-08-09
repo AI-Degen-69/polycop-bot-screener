@@ -65,18 +65,15 @@ def compute_activity(profile, now=None):
     timestamp, so a cached dataset reports ages relative to when it was
     captured rather than when it happens to be viewed.
     """
-    if now is None:
-        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
     last_active_raw = profile.get("last_active")
     last_active = parse_timestamp(last_active_raw)
 
     hours_since = None
-    if last_active is not None:
+    if last_active is not None and now is not None:
         hours_since = max(0.0, (now - last_active).total_seconds() / 3600.0)
 
     daily = _load_daily_stats(profile)
-    cutoff_7d = (now - datetime.timedelta(days=7)).date()
+    cutoff_7d = (now.date() - datetime.timedelta(days=6)) if now is not None else None
 
     trades_7d = 0
     volume_7d = 0.0
@@ -87,15 +84,26 @@ def compute_activity(profile, now=None):
         if not isinstance(entry, dict):
             continue
         day = parse_timestamp(entry.get("date"))
-        if day is None or day.date() < cutoff_7d:
+        if cutoff_7d is not None and (day is None or day.date() < cutoff_7d):
             continue
-        trades = int(entry.get("trades", 0) or 0)
-        volume = float(entry.get("volume", 0.0) or 0.0)
+        try:
+            trades = int(entry.get("trades", 0) or 0)
+        except (ValueError, TypeError):
+            trades = 0
+        try:
+            volume = float(entry.get("volume", 0.0) or 0.0)
+        except (ValueError, TypeError):
+            volume = 0.0
+        try:
+            pnl = float(entry.get("actual_pnl", 0.0) or 0.0)
+        except (ValueError, TypeError):
+            pnl = 0.0
+
         trades_7d += trades
         volume_7d += volume
         if trades > 0 or volume > 0:
             active_days_7d += 1
-        if float(entry.get("actual_pnl", 0.0) or 0.0) > 0:
+        if pnl > 0:
             green_days_7d += 1
 
     return {

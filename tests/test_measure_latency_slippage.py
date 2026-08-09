@@ -35,6 +35,13 @@ def test_calculate_vwap_slippage_empty():
     assert res["vwap"] == 0.0
     assert res["slippage_pct"] == 0.0
 
+def test_calculate_vwap_slippage_exceeds_depth():
+    # Only $15 depth available, but trade size is $50
+    asks = [["0.50", "10"], ["0.50", "20"]]
+    res = calculate_vwap_slippage(asks, 50.0)
+    assert res["incomplete_fill"] is True
+    assert res["unfilled_usd"] == 35.0
+
 def test_filter_prediction_markets():
     raw_events = [
         {"title": "BTC 5 Min Up/Down", "clobTokenIds": ["token1"], "slug": "btc-5m"},
@@ -47,19 +54,21 @@ def test_filter_prediction_markets():
     assert categorized["5m"][0]["token_id"] == "token1"
 
 def test_measure_ws_rtt_shape():
-    """Verify shape: avg/min/max numeric, ok/error/samples_* fields, url is the documented WS endpoint.
-
-    Use a deliberately short timeout so the test stays fast even if the WS server is unreachable.
-    The test does NOT require the WS server to be reachable; it only asserts the response shape.
-    """
+    """Verify shape and mocking without live network calls."""
+    from unittest.mock import patch
     from tools.measure_latency_slippage import measure_ws_rtt, POLYMARKET_WS_URL
-    res = measure_ws_rtt(samples=1, connect_timeout=0.5, ping_timeout=0.5)
-    assert "avg" in res and isinstance(res["avg"], (int, float))
-    assert "min" in res and isinstance(res["min"], (int, float))
-    assert "max" in res and isinstance(res["max"], (int, float))
-    assert "ok" in res and isinstance(res["ok"], bool)
-    assert "samples_completed" in res and isinstance(res["samples_completed"], int)
-    assert "samples_attempted" in res and isinstance(res["samples_attempted"], int)
-    assert "url" in res
-    assert res["url"] == POLYMARKET_WS_URL
-    assert POLYMARKET_WS_URL.startswith("wss://ws-subscriptions-clob.polymarket.com")
+    with patch("tools.measure_latency_slippage._measure_ws_rtt_async", return_value=[42.0]):
+        res = measure_ws_rtt(samples=1)
+        assert res["avg"] == 42.0
+        assert res["ok"] is True
+        assert res["samples_completed"] == 1
+        assert res["samples_attempted"] == 1
+        assert res["url"] == POLYMARKET_WS_URL
+
+def test_measure_ws_rtt_timeout_handled():
+    from unittest.mock import patch
+    from tools.measure_latency_slippage import measure_ws_rtt
+    with patch("tools.measure_latency_slippage._measure_ws_rtt_async", side_effect=TimeoutError("Timed out")):
+        res = measure_ws_rtt(samples=1)
+        assert res["ok"] is False
+        assert "timed out" in res["error"].lower()

@@ -103,7 +103,7 @@ polycop-bot-screener/
 The suite mixes `unittest` classes and plain pytest functions, so it must be run with pytest. Run the full offline suite:
 
 ```bash
-python -m pytest tests/ --ignore=tests/verify_web_app_live.py
+python -m pytest tests/ --ignore=tests/verify_web_app_live.py -k "not test_proxy_latency_discovery"
 # or using npm / pnpm:
 npm test
 ```

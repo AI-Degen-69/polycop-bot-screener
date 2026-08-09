@@ -298,7 +298,7 @@ function renderGrid() {
                     </div>
                     <div class="summary-cell">
                         <span class="summary-lbl">Trades (7d)</span>
-                        <span class="summary-val">${t.activity ? t.activity.trades_7d : 0}</span>
+                        <span class="summary-val">${t.activity?.trades_7d ?? 0}</span>
                     </div>
                 </div>
             </div>
@@ -532,20 +532,23 @@ let packetsList = [];
 let isTestActive = false;
 
 function switchTab(tabId) {
-    console.log("Switching tab to:", tabId);
     document.querySelectorAll(".sidebar-nav .nav-item").forEach(btn => btn.classList.remove("active"));
     document.querySelectorAll(".page-view").forEach(view => view.classList.remove("active"));
 
     if (tabId === "screener") {
         document.getElementById("navScreener")?.classList.add("active");
         document.getElementById("pageScreener")?.classList.add("active");
+        if (globeAnimFrameId) {
+            cancelAnimationFrame(globeAnimFrameId);
+            globeAnimFrameId = null;
+        }
     } else if (tabId === "latency") {
         document.getElementById("navLatency")?.classList.add("active");
         document.getElementById("pageLatency")?.classList.add("active");
         try {
             initGlobeAnimation();
-            renderGaugeMeter(370.75); // Initial sample gauge state
-            renderDistributionPanel(0, 370.75, 800); // Initial sample distribution state
+            renderGaugeMeter(0);
+            renderDistributionPanel(0, 0, 0);
         } catch (e) {
             console.error("Canvas render error:", e);
         }
@@ -886,8 +889,8 @@ function renderDistributionPanel(min, avg, max) {
         else if (relSpread < 2.00) filled = 2;
         else                       filled = 1;
 
-        const stabilityWords = ["chaotic", "jittery", "moderate", "stable", "very stable", "rock-solid"];
-        const word = stabilityWords[filled];
+        const stabilityWords = ["", "chaotic", "jittery", "moderate", "stable", "very stable"];
+        const word = stabilityWords[filled] || "moderate";
         const dots = "\u25cf".repeat(filled) + "\u25cb".repeat(5 - filled);
         if (dotsEl) {
             dotsEl.innerText = dots;
@@ -952,7 +955,7 @@ async function runLatencyTest() {
             med: '<strong>Moderate Friction.</strong> VWAP impact &gt; 0.30%. The orderbook is thin. Consider sizing down or waiting for a deeper book before copying this size.'
         };
         const ariaByTier = {
-            clean: 'Zero F friction, VWAP impact under 0.01 percent.',
+            clean: 'Zero Friction, VWAP impact under 0.01 percent.',
             low: 'Low Friction, VWAP impact 0.01 to 0.30 percent.',
             med: 'Moderate Friction, VWAP impact greater than 0.30 percent.'
         };
@@ -961,16 +964,16 @@ async function runLatencyTest() {
             const v15 = m15Slippage[size] ?? 0;
             const maxVal = Math.max(v5, v15);
             let badgeHtml, tipKey;
-            if (maxVal > 0.3) { badgeHtml = '<span class="friction-badge badge-med" tabindex="0" role="img" aria-label="' + ariaByTier.med + '">Moderate Friction</span>'; tipKey = 'med'; }
-            else if (maxVal > 0.0) { badgeHtml = '<span class="friction-badge badge-low" tabindex="0" role="img" aria-label="' + ariaByTier.low + '">Low Friction</span>'; tipKey = 'low'; }
-            else { badgeHtml = '<span class="friction-badge badge-clean" tabindex="0" role="img" aria-label="' + ariaByTier.clean + '">Zero Friction</span>'; tipKey = 'clean'; }
+            if (maxVal > 0.3) { badgeHtml = '<span class="friction-badge badge-med" role="img" aria-label="' + ariaByTier.med + '">Moderate Friction</span>'; tipKey = 'med'; }
+            else if (maxVal > 0.0) { badgeHtml = '<span class="friction-badge badge-low" role="img" aria-label="' + ariaByTier.low + '">Low Friction</span>'; tipKey = 'low'; }
+            else { badgeHtml = '<span class="friction-badge badge-clean" role="img" aria-label="' + ariaByTier.clean + '">Zero Friction</span>'; tipKey = 'clean'; }
 
             html += `
                 <tr>
                     <td class="size-col">${size}.00</td>
                     <td>${v5.toFixed(2)}%</td>
                     <td>${v15.toFixed(2)}%</td>
-                    <td>${badgeHtml}<span class="friction-tooltip" role="tooltip">${tooltipByTier[tipKey]}</span></td>
+                    <td><span class="friction-badge-wrapper" tabindex="0" role="group">${badgeHtml}<span class="friction-tooltip" role="tooltip">${tooltipByTier[tipKey]}</span></span></td>
                 </tr>
             `;
         });

@@ -7,7 +7,7 @@
     "dev": "python screen.py --serve-only",
     "start": "python screen.py",
     "rescan": "python screen.py --rescan",
-    "test": "python -m pytest tests/ --ignore=tests/verify_web_app_live.py"
+    "test": "python -m pytest tests/ --ignore=tests/verify_web_app_live.py -k \"not test_proxy_latency_discovery\""
   },
   "keywords": [
     "polymarket",

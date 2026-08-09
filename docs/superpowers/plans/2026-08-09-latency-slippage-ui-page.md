@@ -4,9 +4,9 @@
 
 **Goal:** Add a dedicated Latency & Slippage Profiler feature page to the web app accessible via a sidebar menu, complete with host/server location metadata, an animated packet globe visualizer, a 5-level latency gauge meter (Poor/Slow/Average/Good/Fast) on a Red-Yellow-Green scale, live latency tests, and order book slippage matrix tables.
 
-**Architecture:** A left sidebar navigation in `web/index.html` switches between Trader Screener and Latency Profiler pages. A HTML5 canvas renders an animated 3D network packet globe and a semi-circle 5-level gauge meter. Clicking "⚡ Run Live Test" calls `/api/measure_latency` on `proxy_server.py`, which invokes the backend profiling tool and updates the UI gauge and table in real time.
+**Architecture:** A left sidebar navigation in `web/index.html` switches between Trader Screener and Latency Profiler pages. A HTML5 canvas renders an animated 3D network packet globe and a semi-circle 5-level gauge meter. Clicking "⚡ Run Live Test" calls `/api/measure_latency` on `serve_web_app.py`, which invokes the backend profiling tool (`measure_http_rtt` and `measure_ws_rtt` returning `ok`, `error`, `samples_completed`, `samples_attempted`, and `url`) and updates the UI gauge and table in real time.
 
-**Tech Stack:** HTML5, CSS3 (Vanilla Dark Mode + Glassmorphism), Canvas 2D JavaScript, Python HTTP Server (`proxy_server.py`).
+**Tech Stack:** HTML5, CSS3 (Vanilla Dark Mode + Glassmorphism), Canvas 2D JavaScript, Python HTTP Server (`serve_web_app.py`).
 
 ## Global Constraints
 
@@ -24,19 +24,19 @@
 ### Task 1: Backend Latency API Endpoint
 
 **Files:**
-- Modify: `app/src/server/proxy_server.py`
+- Modify: `app/src/server/serve_web_app.py`
 - Test: `tests/test_proxy_server_latency.py`
 
 **Interfaces:**
 - Route: `GET /api/measure_latency`
-- Returns: `{"timestamp": str, "latency": dict, "markets": dict}`
+- Returns: `{"timestamp": str, "latency": {"http_rtt_ms": dict, "ws_rtt_ms": {"avg": float, "min": float, "max": float, "ok": bool, "error": str, "samples_completed": int, "samples_attempted": int, "url": str}}, "markets": dict}`
 
 - [x] **Step 1: Write test for `/api/measure_latency` route**
 
 ```python
 # tests/test_proxy_server_latency.py
 import pytest
-from app.src.server.proxy_server import SimpleProxyHandler
+from app.src.server.serve_web_app import PolyCopScreenerWebHandler
 
 def test_proxy_latency_route_exists():
     from tools.measure_latency_slippage import discover_markets, measure_http_rtt
@@ -50,13 +50,13 @@ def test_proxy_latency_route_exists():
 Run: `python -m pytest tests/test_proxy_server_latency.py -v`
 Expected: PASS.
 
-- [x] **Step 3: Add `/api/measure_latency` endpoint to `app/src/server/proxy_server.py`**
+- [x] **Step 3: Add `/api/measure_latency` endpoint to `app/src/server/serve_web_app.py`**
 
 ```python
-# app/src/server/proxy_server.py (inside do_GET handler)
+# app/src/server/serve_web_app.py (inside do_GET handler)
 elif self.path.startswith("/api/measure_latency"):
     from tools.measure_latency_slippage import (
-        discover_markets, measure_http_rtt, profile_timeframe, TRADE_SIZES
+        discover_markets, measure_http_rtt, measure_ws_rtt, profile_timeframe, TRADE_SIZES
     )
     import datetime
 

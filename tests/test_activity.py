@@ -117,6 +117,34 @@ class TestComputeActivity(unittest.TestCase):
         self.assertEqual(act["trades_7d"], 0)
         self.assertEqual(act["active_days_7d"], 0)
 
+    def test_eighth_oldest_date_excluded(self):
+        """Window for 2026-08-09 is inclusive of 2026-08-03 (6 days prior) through 2026-08-09 (7 dates total). 2026-08-02 is excluded."""
+        profile = {
+            "daily_stats_json": daily_stats([
+                {"date": "2026-08-09", "volume": 10.0, "trades": 1, "actual_pnl": 1.0},
+                {"date": "2026-08-03", "volume": 20.0, "trades": 2, "actual_pnl": 2.0},
+                {"date": "2026-08-02", "volume": 999.0, "trades": 50, "actual_pnl": 100.0},
+            ])
+        }
+        act = compute_activity(profile, now=NOW)
+        self.assertEqual(act["trades_7d"], 3)
+        self.assertEqual(act["volume_7d"], 30.0)
+        self.assertEqual(act["active_days_7d"], 2)
+        self.assertEqual(act["green_days_7d"], 2)
+
+    def test_malformed_numeric_fields_tolerated(self):
+        profile = {
+            "daily_stats_json": daily_stats([
+                {"date": "2026-08-09", "volume": "N/A", "trades": "invalid", "actual_pnl": "N/A"},
+                {"date": "2026-08-08", "volume": 100.0, "trades": 5, "actual_pnl": 20.0},
+            ])
+        }
+        act = compute_activity(profile, now=NOW)
+        self.assertEqual(act["trades_7d"], 5)
+        self.assertEqual(act["volume_7d"], 100.0)
+        self.assertEqual(act["active_days_7d"], 1)
+        self.assertEqual(act["green_days_7d"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

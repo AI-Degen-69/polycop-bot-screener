@@ -1191,6 +1191,7 @@ header {
 .kpi-card.ws-card .kpi-val { font-size: 1.65rem; }
 
 /* Tooltip on distribution panel points up, wider */
+/* Tooltip on distribution panel points up, wider */
 .distribution-panel { position: relative; cursor: help; }
 .distribution-panel:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.4); }
 .distribution-panel .tooltip-text {
@@ -1210,10 +1211,36 @@ header {
 .distribution-panel:hover .tooltip-text,
 .distribution-panel:focus-within .tooltip-text { visibility: visible; opacity: 1; transform: translate(-50%, 0); }
 
+.friction-badge-wrapper {
+    position: relative;
+    display: inline-block;
+}
+.friction-badge-wrapper:hover .friction-tooltip,
+.friction-badge-wrapper:focus-within .friction-tooltip {
+    visibility: visible;
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
 /* Responsive: stack panels vertically on narrow screens */
 @media (max-width: 900px) {
     .latency-stats-row { grid-template-columns: 1fr; }
     .tri-stat-row { grid-template-columns: 1fr; }
     .tri-stat-avg { transform: none; }
+}
+
+@media (max-width: 768px) {
+    .app-sidebar {
+        position: relative;
+        width: 100%;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .app-main-content {
+        margin-left: 0;
+        width: 100%;
+        padding: 1rem;
+    }
 }
 

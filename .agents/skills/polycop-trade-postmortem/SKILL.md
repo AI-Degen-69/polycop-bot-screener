@@ -11,9 +11,9 @@ This skill provides a systematic protocol to analyze Telegram copy-trade executi
 ---
 
 ## When to Trigger
-- Telegram notification screenshots or text pasted into chat showing `Copy Buy`, `Copy Sell`, or `Transaction Failed`.
-- Queries such as "what happened exactly?", "why did my copy trade fail?", or "analyze this Telegram trade update".
-- Whenever reviewing trade activity for a target wallet (e.g., `https://polymarket.com/@username?tab=activity` or `0x...`).
+- Telegram trade execution notification screenshots or text showing `Copy Buy`, `Copy Sell`, or `Transaction Failed`.
+- Explicit postmortem or failure diagnostic requests (e.g., "why did my copy trade fail?", "diagnose this Telegram order rejection").
+- Note: For general target wallet evaluations or copy candidate scoring, use the `polymarket-wallet-audit` skill required by `.agents/AGENTS.md`.
 
 ---
 
@@ -22,31 +22,34 @@ This skill provides a systematic protocol to analyze Telegram copy-trade executi
 ### Step 1: Extract Telegram Trade Parameters
 Extract the following key fields from the notification:
 1. **Target Wallet**: `0x...` address & tag.
-2. **Market Title & Outcome**: e.g., `Malmo FF vs. Degerfors IF: Degerfors IF O/U 1.5 (Over)`.
-3. **Target Order Sizing & Price**: Sizing in USD (e.g., `$232.38`) & Target Price (e.g., `$0.18`).
-4. **Copy Attempt Sizing & Market Price**: Copy USD (e.g., `$5`) & Market Price cap hit (e.g., `$0.198`).
-5. **Bot Error Code / Text**: e.g., `Transaction Failed: Insufficient slippage, poor liquidity...`.
+2. **Market Identifier & Title**: Condition ID / token ID and title (e.g., `Malmo FF vs. Degerfors IF: Degerfors IF O/U 1.5 (Over)`).
+3. **Execution Timestamp & Trade Side**: UTC timestamp or explicit offset, and side (`Copy Buy`, `Copy Sell`, or failure).
+4. **Transaction Hash / Relayer ID**: On-chain tx hash or relayer job ID if present.
+5. **Target Order Sizing & Price**: Sizing in USD (e.g., `$232.38`) & Target Price (e.g., `$0.18`).
+6. **Copy Attempt Sizing & Market Price**: Copy USD (e.g., `$5`) & Market Price cap hit (e.g., `$0.198`).
+7. **Bot Error Code / Text**: e.g., `Transaction Failed: Insufficient slippage, poor liquidity...`.
 
 ### Step 2: Fetch Target Wallet Live Data
-Query the Polymarket Data API for the target wallet:
+Query the Polymarket Activity API to retrieve recent trader transactions for the specified address:
 ```bash
 python -c "import urllib.request, json; req = urllib.request.Request('https://data-api.polymarket.com/activity?user=<WALLET_ADDRESS>&limit=50', headers={'User-Agent': 'Mozilla/5.0'}); print(urllib.request.urlopen(req).read().decode())"
 ```
-Filter trades by timestamp matching the Telegram alert to isolate target order size, exact execution price, and follow-up trades (e.g., quick sells).
+Filter the response by timestamp matching the Telegram notification to verify target order size, exact execution price, and follow-up trades (e.g., rapid exit sells). Refer to official Polymarket Data API documentation for query parameter details.
 
 ### Step 3: Diagnostic Root Cause Matrix
 
 | Observed Symptom | Underlying Root Cause | Verification Rule |
 | :--- | :--- | :--- |
-| **Slippage Cap Rejection** | Target's large market order swept all asks up to configured max slippage ceiling. | `(Market Price - Target Price) / Target Price == Max Slippage Limit` (e.g. 0.198 / 0.18 = +10%). |
-| **Thin Orderbook Sweep** | Live sports/in-play market has shallow liquidity (< $500 asks). | Target bought > $200 in a single order, causing instant 10-30% price gap. |
-| **Target Quick Scalp / Dump** | Target sold position 30s–2m after buying. | API activity shows SELL order right after BUY at higher price. |
-| **Minimum Order Size Failure** | Scaled trade fell below $1.00 USD minimum floor. | Calculated copy trade < $1.00. |
+| **Slippage Cap Rejection** | Target's large order swept asks up to max slippage ceiling. | If `Target Price > 0`, calculate `Slippage Pct = (Market Price - Target Price) / Target Price`. Verify `Slippage Pct >= (Max Slippage Limit - tolerance)` (e.g., `(0.198 - 0.18) / 0.18 = +10% >= 10%`). If `Target Price == 0`, flag as invalid target price. |
+| **Thin Orderbook Sweep** | Target order swept shallow ask depth. | Measure ask-side cumulative executable depth, best ask, requested size, VWAP for size, and measured slippage for the order. |
+| **Target Quick Scalp / Dump** | Target sold position shortly after buying. | Activity log shows a matching SELL order within 30s–2m after the BUY at a higher price. |
+| **Minimum Order Size Failure** | Scaled trade fell below minimum floor. | Calculated trade size < active floor (documented platform minimum `$1.00` USD or task's min-filling setting). |
 
 ### Step 4: Actionable Remediation Rules
 - **If Slippage Cap Hit on Thin Market**:
-  1. Increase PolyCop max slippage setting from 10% to 15%–20% (or use limit orders with price offset).
-  2. Enable auto-retry (1–3 attempts).
+  1. Verify safety prerequisites: confirm Max Per Trade, Max Per Market limits are active and check live orderbook depth.
+  2. If prerequisites are satisfied, adjust max slippage setting (e.g., 10% to 15%–20%) or use limit orders with price offset.
+  3. For auto-retries (1–3 attempts): verify prior request did not fill, refresh live orderbook before each retry attempt, and enforce idempotency using a client order ID or intentional FAK (Fill-And-Kill) order type.
 - **If Target is Live Micro-Scalper**:
   1. Evaluate if target's large trades ($200+) wreck copy prices for small $5–$10 copy orders.
   2. Switch target to Fixed Limit Order mode or filter out high-slippage sports markets.

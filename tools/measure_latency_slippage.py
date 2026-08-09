@@ -29,7 +29,7 @@ def _extract_price_size(item):
 
 def calculate_vwap_slippage(asks: list, trade_size_usd: float) -> dict:
     if not asks:
-        return {"best_ask": 0.0, "vwap": 0.0, "slippage_pct": 0.0}
+        return {"best_ask": 0.0, "vwap": 0.0, "slippage_pct": 0.0, "incomplete_fill": False, "unfilled_usd": 0.0}
 
     parsed_asks = []
     for item in asks:
@@ -38,7 +38,7 @@ def calculate_vwap_slippage(asks: list, trade_size_usd: float) -> dict:
             parsed_asks.append((p, s))
 
     if not parsed_asks:
-        return {"best_ask": 0.0, "vwap": 0.0, "slippage_pct": 0.0}
+        return {"best_ask": 0.0, "vwap": 0.0, "slippage_pct": 0.0, "incomplete_fill": False, "unfilled_usd": 0.0}
 
     sorted_asks = sorted(parsed_asks, key=lambda x: x[0])
     best_ask = sorted_asks[0][0]
@@ -60,15 +60,19 @@ def calculate_vwap_slippage(asks: list, trade_size_usd: float) -> dict:
             accumulated_shares += size_shares
 
     if accumulated_shares == 0.0:
-        return {"best_ask": best_ask, "vwap": best_ask, "slippage_pct": 0.0}
+        return {"best_ask": best_ask, "vwap": best_ask, "slippage_pct": 0.0, "incomplete_fill": False, "unfilled_usd": 0.0}
 
     vwap = accumulated_usd / accumulated_shares
     slippage_pct = ((vwap - best_ask) / best_ask) * 100.0 if best_ask > 0 else 0.0
+    incomplete_fill = accumulated_usd < trade_size_usd
+    unfilled_usd = round(trade_size_usd - accumulated_usd, 2) if incomplete_fill else 0.0
 
     return {
         "best_ask": round(best_ask, 4),
         "vwap": round(vwap, 4),
-        "slippage_pct": round(slippage_pct, 4)
+        "slippage_pct": round(slippage_pct, 4),
+        "incomplete_fill": incomplete_fill,
+        "unfilled_usd": unfilled_usd
     }
 
 def fetch_active_clob_tokens() -> list:
@@ -138,19 +142,21 @@ def filter_prediction_markets(items: list) -> dict:
     return result
 
 def discover_markets() -> dict:
-    tokens = fetch_active_clob_tokens()
-    if tokens:
-        items = [{"title": f"CLOB Active Token {t[:10]}", "token_id": t} for t in tokens]
-        return {"5m": items[:5], "15m": items[5:10]}
-
     url = "https://gamma-api.polymarket.com/markets?limit=100&active=true&closed=false&order=volume24hr&dir=desc"
     try:
         resp = requests.get(url, timeout=3)
         if resp.status_code == 200:
             markets = resp.json()
-            return filter_prediction_markets(markets)
+            classified = filter_prediction_markets(markets)
+            if classified["5m"] or classified["15m"]:
+                return classified
     except Exception as e:
         print(f"Error fetching Gamma markets: {e}")
+
+    tokens = fetch_active_clob_tokens()
+    if tokens:
+        items = [{"title": f"CLOB Active Token {t[:10]}", "token_id": t} for t in tokens]
+        return filter_prediction_markets(items)
 
     return {"5m": [], "15m": []}
 
@@ -165,23 +171,44 @@ def fetch_orderbook(token_id: str) -> dict:
     return {"asks": [], "bids": []}
 
 def measure_http_rtt(token_id: str, samples: int = 3) -> dict:
-    url = f"https://clob.polymarket.com/book?token_id={token_id}"
+    url = f"https://clob.polymarket.com/book?token_id={token_id}" if token_id else "https://clob.polymarket.com/sampling-simplified-markets"
     rtts = []
+    attempted = 0
+    last_err = ""
     for _ in range(samples):
+        attempted += 1
         start = time.perf_counter()
         try:
             resp = requests.get(url, timeout=2)
             if resp.status_code == 200:
                 rtts.append((time.perf_counter() - start) * 1000.0)
-        except Exception:
-            pass
+            else:
+                last_err = f"HTTP {resp.status_code}"
+        except Exception as e:
+            last_err = str(e)
         time.sleep(0.02)
+
     if not rtts:
-        return {"avg": 0.0, "min": 0.0, "max": 0.0}
+        return {
+            "avg": 0.0,
+            "min": 0.0,
+            "max": 0.0,
+            "ok": False,
+            "error": last_err or "No successful HTTP probes completed",
+            "samples_completed": 0,
+            "samples_attempted": attempted,
+            "url": url
+        }
+
     return {
         "avg": round(sum(rtts) / len(rtts), 2),
         "min": round(min(rtts), 2),
-        "max": round(max(rtts), 2)
+        "max": round(max(rtts), 2),
+        "ok": True,
+        "error": "",
+        "samples_completed": len(rtts),
+        "samples_attempted": attempted,
+        "url": url
     }
 
 async def _measure_ws_rtt_async(url: str, samples: int, connect_timeout: float, ping_timeout: float) -> list:
@@ -327,9 +354,8 @@ def main():
     if ws_stats["ok"]:
         print(f"WS PING RTT      : Avg {ws_stats['avg']} ms | Min {ws_stats['min']} ms | Max {ws_stats['max']} ms "
               f"({ws_stats['url']})")
-    print("-" * 65)
-    print(f"{'Trade Size':<12} | {'5-Min Market Slippage':<22} | {'15-Min Market Slippage':<22}")
-    print("-" * 65)
+    print(f"| {'Trade Size':<12} | {'5-Min Market Slippage':<22} | {'15-Min Market Slippage':<22} |")
+    print(f"|{'-' * 14}|{'-' * 24}|{'-' * 24}|")
     for size in TRADE_SIZES:
         k = f"${int(size)}"
         s5 = f"{profile_5m['slippage_pct'].get(k, 0.0):.2f}%"
