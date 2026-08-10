@@ -74,6 +74,26 @@ def test_a_malformed_figure_reads_unmeasured_not_a_crash():
     assert parsed["trading_days"] == 0
 
 
+def test_a_non_finite_figure_reads_unmeasured_not_a_crash():
+    """float("nan") and float("inf") do not raise, so they would read as
+    measured numbers (or crash an int coercion) without the finite guard — a
+    hostile or broken upstream must read as unmeasured, never as a value.
+    (CodeRabbit review, PR #28.)
+    """
+    # String spellings ("inf"/"nan") raise ValueError inside float(); the
+    # numeric Infinity a JSON parser produces raises OverflowError inside
+    # int() — both must read as unmeasured.
+    parsed = parse_simulated_run_response({
+        "sim_total_pnl": "inf",
+        "max_drawdown": "nan",
+        "trading_days": float("inf"),
+        "logs": [],
+    })
+    assert parsed["sim_total_pnl"] == 0.0
+    assert parsed["max_drawdown"] is None
+    assert parsed["trading_days"] == 0
+
+
 def test_extract_skip_reasons_returns_only_the_refusals():
     """Spec #13: the decision log retained as reasons. Only the window's
     refusal (SKIP_FILTER) and the risk cap (SKIP_CAP) stop an entry becoming

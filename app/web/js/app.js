@@ -111,9 +111,13 @@ function renderProvenanceBanner(data) {
         const headline = anySimulated
             ? "⚠️ Simulation interrupted — some wallets are triage order only"
             : "⚠️ Showing triage order, not simulated results";
+        // fallback_reason comes from caught sweep exceptions and failed fetch
+        // errors, so it must be escaped before the banner interpolates it
+        // (CodeRabbit review, PR #28).
+        const fallbackReason = data.fallback_reason ? `: ${escapeHtml(data.fallback_reason)}` : "";
         const detail = anySimulated
-            ? `The endpoint stopped answering mid-scan${data.fallback_reason ? `: ${data.fallback_reason}` : ""}. Wallets simulated before the outage keep their verdicts; the rest are ordered by Copyability Score, which triages candidates but is not a verdict.`
-            : `The simulation could not run${data.fallback_reason ? `: ${data.fallback_reason}` : ""}. Wallets below are ordered by Copyability Score, which triages candidates but is not a verdict. No Tier on this page was produced by a simulation.`;
+            ? `The endpoint stopped answering mid-scan${fallbackReason}. Wallets simulated before the outage keep their verdicts; the rest are ordered by Copyability Score, which triages candidates but is not a verdict.`
+            : `The simulation could not run${fallbackReason}. Wallets below are ordered by Copyability Score, which triages candidates but is not a verdict. No Tier on this page was produced by a simulation.`;
         banner.innerHTML = `
             <div class="provenance-headline">${headline}</div>
             <div class="provenance-detail">${detail}</div>

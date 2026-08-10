@@ -27,6 +27,13 @@ The stretch is not uniform: the top of the distribution moved more than the midd
 (median ×1.02 vs. max ×1.11), because the reweight's redistributed points landed
 proportionally on parameters the leading wallets already measured well on.
 
+Two causes moved between the runs, not one: the reweight AND a fresh scrape (1,401
+profiles / 66 survivors in the 0005 run, 2,120 / 105 now). The shares quoted below
+are therefore the honest comparison — raw counts across different populations
+would be misleading — and the direction of the shift (upper tail stretching more
+than the middle) is the signature of the reweight regardless of the population
+refresh.
+
 ## The distortion under the old floors
 
 Under the ADR 0005 floors (72 / 65 / 60 / 50) the same re-measured run placed 12 wallets

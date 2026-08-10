@@ -13,7 +13,7 @@ across the parameters triage can actually measure.
 The alternative — ten points for a proxy computable from leaderboard fields — was rejected. Copyable
 Window Share is distributional: it counts the share of entry signals the Copyable Trade Window
 admits, which requires the per-trade size distribution only a Simulated Copy Run provides. The
-leaderboard profile offers one size figure, `avg_invest`, which Sizing Fit already turns into five
+leaderboard profile offers one size figure, `avg_invest`, which Sizing Fit already turns into six
 points. A proxy would either duplicate Sizing Fit on a weaker signal or be an ungrounded guess, and
 ADR 0002's premise is that the screen measures copyability rather than inferring it from proxies.
 The screen's founding commitment is "stop inferring copyability and measure it"; inventing a new

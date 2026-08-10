@@ -140,5 +140,26 @@ class TestUnmeasuredFiguresAreNotShownAsZero(unittest.TestCase):
         self.assertIn("Not measured", match.group(1))
 
 
+class TestTheDegradeBannerEscapesItsFailureText(unittest.TestCase):
+    """fallback_reason is populated from caught sweep exceptions and failed
+    endpoint responses, so it must go through escapeHtml before the banner
+    interpolates it into innerHTML — never raw (CodeRabbit, PR #28)."""
+
+    def setUp(self):
+        self.app_js = _read(APP_JS)
+        banner = self.app_js.split("data.reduced_confidence", 1)[1]
+        self.banner = banner.split("banner.hidden = false", 1)[0]
+
+    def test_the_fallback_reason_is_escaped_before_interpolation(self):
+        self.assertIn("escapeHtml(data.fallback_reason)", self.banner)
+
+    def test_no_raw_interpolation_of_the_fallback_reason_survives(self):
+        self.assertNotRegex(
+            self.banner,
+            r"\$\{data\.fallback_reason\}",
+            "the raw reason must never reach innerHTML unescaped",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

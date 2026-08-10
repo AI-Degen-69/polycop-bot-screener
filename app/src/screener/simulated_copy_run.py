@@ -10,6 +10,7 @@ It lives in the screener, not beside the transport, because it is domain
 logic — what a response means for copyability. The transport module
 (`pipeline.run_mock_client`) fetches; this module reads.
 """
+import math
 import re
 from typing import Any, Dict, List
 
@@ -60,7 +61,10 @@ def _coerce_float(value, default: float) -> float:
     if value is None:
         return default
     try:
-        return float(value)
+        parsed = float(value)
+        # float("nan") and float("inf") do not raise, and an infinite figure
+        # must not read as a measured number (CodeRabbit review, PR #28).
+        return parsed if math.isfinite(parsed) else default
     except (ValueError, TypeError):
         return default
 
@@ -70,7 +74,9 @@ def _coerce_int(value, default: int) -> int:
         return default
     try:
         return int(value)
-    except (ValueError, TypeError):
+    # OverflowError: int(float("inf")) — an infinite figure must not crash a
+    # scan either, it reads as unmeasured like any other malformed field.
+    except (ValueError, TypeError, OverflowError):
         return default
 
 

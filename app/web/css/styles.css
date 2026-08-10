@@ -1365,5 +1365,5 @@ header {
     color: #cbd5e1;
     font-weight: 400;
     white-space: normal;
-    word-break: break-word;
+    overflow-wrap: anywhere;
 }
