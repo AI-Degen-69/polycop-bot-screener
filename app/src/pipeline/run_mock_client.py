@@ -64,3 +64,93 @@ def calculate_copyable_window_share(data: Dict[str, Any]) -> float:
     
     intercept_count = sum(1 for item in logs if item.get("type") == "INTERCEPT" or item.get("status") == "INTERCEPT")
     return intercept_count / float(len(logs))
+
+_last_request_time = 0.0
+
+def fetch_simulated_copy_run(
+    wallet: str,
+    profile=None,
+    slippage: float = 10.0,
+    fetcher=None,
+    cache_dir: Optional[str] = None,
+    throttle_seconds: float = 0.1
+) -> Dict[str, Any]:
+    """
+    Fetch a Simulated Copy Run for a wallet under a specific Copy Execution Profile.
+    Cached by wallet + profile fingerprint + slippage level.
+    """
+    import os
+    import time
+    try:
+        from execution.copy_execution_profile import CURRENT_PROFILE
+    except ModuleNotFoundError:
+        from app.src.execution.copy_execution_profile import CURRENT_PROFILE
+
+
+    if profile is None:
+        profile = CURRENT_PROFILE
+
+    wallet_clean = wallet.lower().strip()
+    cache_filename = f"{wallet_clean}_{profile.fingerprint}_{int(slippage)}.json"
+    
+    if cache_dir:
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, cache_filename)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                return {"success": True, "cached": True, "data": cached_data}
+            except Exception:
+                pass
+    else:
+        cache_path = None
+
+    payload = build_run_mock_payload(
+        wallet=wallet_clean,
+        copy_pct=profile.copy_ratio * 100.0,
+        slippage=slippage,
+        capital=profile.bankroll_usd
+    )
+
+    if fetcher is None:
+        def default_fetcher(p):
+            import urllib.request
+            url = "https://polycop.fun/api/run_mock"
+            data_bytes = json.dumps(p).encode("utf-8")
+            req = urllib.request.Request(url, data=data_bytes, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"HTTP {resp.status}")
+                return json.loads(resp.read().decode("utf-8"))
+        fetcher = default_fetcher
+
+    global _last_request_time
+    now = time.time()
+    elapsed = now - _last_request_time
+    if elapsed < throttle_seconds:
+        time.sleep(throttle_seconds - elapsed)
+    _last_request_time = time.time()
+
+    try:
+        raw_res = fetcher(payload)
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Endpoint unavailable: {str(e)}",
+            "data": None
+        }
+
+    if cache_path:
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(raw_res, f, indent=2)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "cached": False,
+        "data": raw_res
+    }
+

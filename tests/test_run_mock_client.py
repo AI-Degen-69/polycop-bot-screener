@@ -55,3 +55,54 @@ def test_calculate_copyable_window_share_reconciliation():
     # 2 INTERCEPT decisions out of 4 total target trade signals evaluated
     share = calculate_copyable_window_share(mock_data)
     assert share == 0.5
+
+def test_fetch_simulated_copy_run_caching_and_injected_fetcher(tmp_path):
+    from app.src.execution.copy_execution_profile import CopyExecutionProfile
+
+    from app.src.pipeline.run_mock_client import fetch_simulated_copy_run
+
+    profile1 = CopyExecutionProfile(bankroll_usd=100.0, copy_ratio=0.03)
+    profile2 = CopyExecutionProfile(bankroll_usd=200.0, copy_ratio=0.05)
+    
+    call_count = 0
+    def mock_fetcher(payload):
+        nonlocal call_count
+        call_count += 1
+        return {"sim_total_pnl": 50.0, "target_total_pnl": 100.0, "logs": []}
+
+    wallet = "0x1234567890abcdef1234567890abcdef12345678"
+    cache_dir = str(tmp_path)
+
+    # First fetch: Cache MISS -> fetcher called
+    res1 = fetch_simulated_copy_run(wallet, profile=profile1, fetcher=mock_fetcher, cache_dir=cache_dir)
+    assert res1["success"] is True
+    assert res1["cached"] is False
+    assert call_count == 1
+
+    # Second fetch with identical profile: Cache HIT -> fetcher NOT called
+    res2 = fetch_simulated_copy_run(wallet, profile=profile1, fetcher=mock_fetcher, cache_dir=cache_dir)
+    assert res2["success"] is True
+    assert res2["cached"] is True
+    assert call_count == 1
+
+    # Third fetch with modified profile: Cache MISS -> fetcher called again
+    res3 = fetch_simulated_copy_run(wallet, profile=profile2, fetcher=mock_fetcher, cache_dir=cache_dir)
+    assert res3["success"] is True
+    assert res3["cached"] is False
+    assert call_count == 2
+
+def test_fetch_simulated_copy_run_unavailable_result(tmp_path):
+    from app.src.execution.copy_execution_profile import CURRENT_PROFILE
+    from app.src.pipeline.run_mock_client import fetch_simulated_copy_run
+
+
+    def failing_fetcher(payload):
+        raise ConnectionError("Service unavailable")
+
+    wallet = "0x1234567890abcdef1234567890abcdef12345678"
+    res = fetch_simulated_copy_run(wallet, profile=CURRENT_PROFILE, fetcher=failing_fetcher, cache_dir=str(tmp_path))
+
+    assert res["success"] is False
+    assert res["error"] == "Endpoint unavailable: Service unavailable"
+    assert res["data"] is None
+
