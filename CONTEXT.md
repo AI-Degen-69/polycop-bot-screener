@@ -46,6 +46,12 @@ _Avoid_: grade, class
 A wallet the screen rates highly while the leaderboard's own score rates it poorly. The disagreement
 is the point.
 
+**Scan**:
+A complete screening pass: every candidate scraped, filtered, scored and simulated together,
+producing the feed the page reads. One wallet being scored is not a scan; a scan is the whole
+pass. A repeated scan is a rescan.
+_Avoid_: run, audit run, pipeline run
+
 ### Execution
 
 **Bankroll**:
