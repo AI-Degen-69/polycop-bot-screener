@@ -8,7 +8,11 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
-from pipeline.phase3_simulation_rank import assign_simulated_tier, run_phase3_simulation_rank  # noqa: E402
+from pipeline.phase3_simulation_rank import (  # noqa: E402
+    DATA_DIR,
+    assign_simulated_tier,
+    run_phase3_simulation_rank,
+)
 from screener.score_wallets import (  # noqa: E402
     SIM_TIER_A_MIN,
     SIM_TIER_B_MIN,
@@ -275,3 +279,22 @@ def test_the_feed_states_the_profile_its_numbers_were_computed_under():
     assert profile["bankroll_usd"] == CURRENT_PROFILE.bankroll_usd
     assert profile["copy_ratio"] == CURRENT_PROFILE.copy_ratio
     assert profile["fingerprint"] == CURRENT_PROFILE.fingerprint
+
+
+def test_a_fixture_run_never_touches_the_live_feed_file():
+    """Fixture-driven runs (all of the tests here) must not write the feed the
+
+    web app serves. An earlier version wrote unconditionally, so every
+    test-suite run clobbered app/data/phase3_simulated_targets.json with
+    synthetic wallets. The production path (targets=None, reading Phase 2)
+    is the only one allowed to publish.
+    """
+    feed = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+    before = open(feed, "rb").read() if os.path.exists(feed) else None
+
+    run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+
+    after = open(feed, "rb").read() if os.path.exists(feed) else None
+    assert after == before, "a fixture run rewrote the live feed file"

@@ -216,12 +216,18 @@ def run_phase3_simulation_rank(
         "simulated_targets": simulated_results
     }
 
-    out_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
-    try:
-        with open(out_file, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-    except Exception:
-        pass
+    # The feed the web app serves is written only on the production path
+    # (targets read from the Phase 2 file). Runs that were handed explicit
+    # targets — every test in this repo — must not touch the live data dir;
+    # an earlier version wrote unconditionally and every test-suite run
+    # clobbered the feed with fixture wallets.
+    if targets is None:
+        out_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+        try:
+            with open(out_file, "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2)
+        except Exception:
+            pass
 
     return summary
 
