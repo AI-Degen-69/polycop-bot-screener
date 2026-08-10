@@ -86,8 +86,14 @@ def calculate_daily_green_rate(daily_stats_json: Any) -> Tuple[Optional[float], 
     for day in series:
         if not isinstance(day, dict):
             continue
+        raw = day.get("bt_copy_pnl")
+        if raw is None:
+            # A day the series does not report is not a flat day. Counting it as
+            # one would dilute the rate and inflate the observed-day count that
+            # the minimum-days floor relies on.
+            continue
         try:
-            copy_pnl = float(day.get("bt_copy_pnl", 0.0))
+            copy_pnl = float(raw)
         except (ValueError, TypeError):
             continue
         observed += 1

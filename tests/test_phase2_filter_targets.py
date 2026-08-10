@@ -155,6 +155,18 @@ class TestRecentFormWillNotAssumeFrictionlessExecution(unittest.TestCase):
         self.assertEqual(_points(target, "Recent Form"), 0.0)
 
 
+class TestAbsentRatioFieldsDoNotBecomeMeasuredZeroes(unittest.TestCase):
+    def test_a_null_ratio_does_not_abort_the_run(self):
+        target = _run([_profile("0xnullroi", roi=None)])["verified_targets"][0]
+        self.assertIsNone(target["metrics"]["edge_to_friction"])
+        self.assertEqual(_points(target, "Edge-to-Friction"), 0.0)
+
+    def test_a_null_ratio_falls_through_to_the_next_field(self):
+        target = _run([_profile("0xfallback", roi=None, pnl_to_volume_ratio=25.0)])["verified_targets"][0]
+        self.assertIsNotNone(target["metrics"]["edge_to_friction"])
+        self.assertGreater(_points(target, "Edge-to-Friction"), 0.0)
+
+
 class TestUnmeasurableWalletsScoreNothing(unittest.TestCase):
     """The regression guard: a wallet with no source series must not score well."""
 

@@ -89,7 +89,14 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         window_share = calculate_copyable_window_share(mock_payload) if mock_payload else None
         green_rate, observed_days = calculate_daily_green_rate(p.get("daily_stats_json"))
         drawdown_depth = calculate_drawdown_depth(p.get("all_pnl_json"))
-        pnl_vol_ratio = float(p.get("roi", p.get("pnl_to_volume_ratio", p.get("pnl_vol_ratio", 0.0))))
+        # Each fallback is tried only when the one before it is genuinely absent,
+        # so a present-but-null field does not abort the run or masquerade as a
+        # measured zero.
+        pnl_vol_ratio = None
+        for key in ("roi", "pnl_to_volume_ratio", "pnl_vol_ratio"):
+            pnl_vol_ratio = _optional_float(p.get(key))
+            if pnl_vol_ratio is not None:
+                break
         edge_to_friction = calculate_edge_to_friction(pnl_vol_ratio, profile.slippage_pct)
 
         raw_metrics = {
@@ -103,7 +110,9 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
             "r20_win_rate": float(p.get("r20_wr", p.get("recent_20_win_rate", p.get("r20_win_rate", 0.0)))),
             "r20_pnl": float(p.get("r20_pnl", p.get("recent_20_pnl", 0.0))),
             "r20_slip": _optional_float(p.get("r20_slip", p.get("recent_20_slippage"))),
-            "pnl_vol_ratio": pnl_vol_ratio,
+            # Capital Efficiency reads this directly and an unknown ratio earns
+            # nothing there, which zero already expresses.
+            "pnl_vol_ratio": pnl_vol_ratio if pnl_vol_ratio is not None else 0.0,
             "avg_invest": float(p.get("avg_invest", 0.0)),
             "markets": int(p.get("markets_traded", p.get("markets", 0))),
             "polycop_site_score": float(p.get("polycop_site_score", p.get("score", 0.0))),

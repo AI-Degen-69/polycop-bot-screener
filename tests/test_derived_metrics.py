@@ -89,6 +89,30 @@ class TestDailyGreenRate(unittest.TestCase):
         self.assertAlmostEqual(rate, 50.0)
         self.assertEqual(days, 10)
 
+    def test_a_day_the_series_does_not_report_is_not_an_observed_day(self):
+        # Ten measured green days beside ten unreported ones is a 100% rate over
+        # ten days, not a 50% rate over twenty.
+        days = [
+            {"date": f"2026-08-{i + 1:02d}", "volume": 10.0, "trades": 1,
+             "actual_pnl": 5.0, "bt_copy_pnl": 1.0}
+            for i in range(10)
+        ] + [
+            {"date": f"2026-08-{i + 11:02d}", "volume": 10.0, "trades": 1, "actual_pnl": 5.0}
+            for i in range(10)
+        ]
+        rate, observed = calculate_daily_green_rate(json.dumps(days))
+        self.assertAlmostEqual(rate, 100.0)
+        self.assertEqual(observed, 10)
+
+    def test_an_explicit_null_is_unreported_rather_than_flat(self):
+        days = [
+            {"date": "2026-08-01", "bt_copy_pnl": 5.0},
+            {"date": "2026-08-02", "bt_copy_pnl": None},
+        ]
+        rate, observed = calculate_daily_green_rate(json.dumps(days))
+        self.assertAlmostEqual(rate, 100.0)
+        self.assertEqual(observed, 1)
+
     def test_reports_the_real_observed_day_count(self):
         _, days = calculate_daily_green_rate(self._series([1] * 7))
         self.assertEqual(days, 7)
