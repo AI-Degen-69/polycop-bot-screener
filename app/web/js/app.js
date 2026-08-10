@@ -59,32 +59,94 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 });
 
+// Everything on the page comes precomputed from the pipeline. The browser does
+// no scoring: a second engine here could disagree with the first, and when two
+// numbers disagree the one on screen is the one that gets acted on.
+const FEED_URL = "/data/phase3_simulated_targets.json";
+
+function normaliseTarget(row) {
+    // The rest of the page was written against the triage feed's field names.
+    // Map once here rather than touching every reader.
+    return Object.assign({}, row, {
+        final_score: row.triage_copyability_score ?? 0,
+        grade: row.triage_grade || "Ungraded"
+    });
+}
+
+function renderProvenanceBanner(data) {
+    const banner = document.getElementById("provenanceBanner");
+    if (!banner) return;
+
+    const profile = data.copy_execution_profile || {};
+    const ratio = profile.copy_ratio !== undefined ? `${(profile.copy_ratio * 100).toFixed(1)}%` : "—";
+    const bankroll = profile.bankroll_usd !== undefined ? `$${profile.bankroll_usd}` : "—";
+    const slippage = profile.slippage_pct !== undefined ? `${profile.slippage_pct}%` : "—";
+    const fingerprint = profile.fingerprint ? profile.fingerprint.slice(0, 12) : "unknown";
+
+    const profileLine = `
+        <div class="provenance-profile">
+            Computed under bankroll <strong>${bankroll}</strong>,
+            copy ratio <strong>${ratio}</strong>,
+            slippage <strong>${slippage}</strong>
+            <span class="provenance-fingerprint" title="Copy Execution Profile fingerprint">${fingerprint}</span>
+        </div>
+    `;
+
+    if (data.reduced_confidence) {
+        banner.className = "provenance-banner degraded";
+        banner.innerHTML = `
+            <div class="provenance-headline">
+                ⚠️ Showing triage order, not simulated results
+            </div>
+            <div class="provenance-detail">
+                The simulation could not run${data.fallback_reason ? `: ${data.fallback_reason}` : ""}.
+                Wallets below are ordered by Copyability Score, which triages candidates
+                but is not a verdict. No Tier on this page was produced by a simulation.
+            </div>
+            ${profileLine}
+        `;
+    } else {
+        banner.className = "provenance-banner";
+        banner.innerHTML = `
+            <div class="provenance-headline">Ranked by simulated performance on your bankroll</div>
+            ${profileLine}
+        `;
+    }
+    banner.hidden = false;
+}
+
 async function loadDataset() {
     try {
-        const resp = await fetch("/data/phase2_verified_targets.json?t=" + Date.now(), { cache: "no-store" });
+        const resp = await fetch(FEED_URL + "?t=" + Date.now(), { cache: "no-store" });
         if (!resp.ok) throw new Error("Dataset file not found");
         const data = await resp.json();
-        allTargets = data.verified_targets || [];
+        allTargets = (data.simulated_targets || []).map(normaliseTarget);
+        renderProvenanceBanner(data);
         updateSummaryHeader(data);
         filterAndRender();
     } catch (e) {
-        console.warn("Could not load /data/phase2_verified_targets.json:", e);
+        console.warn(`Could not load ${FEED_URL}:`, e);
         allTargets = [];
+        const banner = document.getElementById("provenanceBanner");
+        if (banner) banner.hidden = true;
         updateSummaryHeader({});
         document.getElementById("walletsGrid").innerHTML = `
             <div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: #9ca3af;">
                 <h3>⚠️ No Cached Scan Data Found</h3>
-                <p style="margin-top: 0.5rem;">Click <strong>⚡ Scan Leaderboard API</strong> above to perform an automated scan of all PolyCop profiles with PolyCop Score > 60.</p>
+                <p style="margin-top: 0.5rem;">Click <strong>⚡ Scan Leaderboard API</strong> above to scrape the leaderboard, triage it, and simulate the survivors against your Copy Execution Profile.</p>
             </div>
         `;
     }
 }
 
 function updateSummaryHeader(data = {}) {
-    const totalScanned = data.total_scraped_profiles ?? (allTargets.length > 0 ? allTargets.length : 0);
-    const totalVerified = data.total_verified_targets ?? allTargets.length;
-    const sTierCount = data.s_tier_count ?? allTargets.filter(t => t.final_score >= 90).length;
-    const gemsCount = data.hidden_gems_count ?? allTargets.filter(t => t.is_hidden_gem).length;
+    const totalScanned = data.total_targets_evaluated ?? allTargets.length;
+    const totalVerified = data.simulated_survivors_count ?? allTargets.length;
+    // Counted from simulated verdicts only. A degraded run has no simulated
+    // tiers at all, so this reads zero rather than counting triage grades.
+    const sTierCount = allTargets.filter(t => t.verdict_source === "simulation"
+        && typeof t.tier === "string" && t.tier.startsWith("S-Tier")).length;
+    const gemsCount = allTargets.filter(t => t.is_hidden_gem).length;
 
     document.getElementById("statTotalScanned").innerText = totalScanned;
     document.getElementById("statVerified").innerText = totalVerified;
@@ -181,7 +243,13 @@ function filterAndRender() {
         return matchesSearch && matchesGem && matchesActivityFilter(t) && matchesCopyReady;
     });
 
-    if (sortVal === "score-desc") filteredTargets.sort((a, b) => b.final_score - a.final_score);
+    if (sortVal === "retention-desc") {
+        // An unsimulated wallet has no retention to rank on, so it sorts below
+        // every wallet that does rather than being treated as a zero.
+        filteredTargets.sort((a, b) =>
+            ((b.edge_retention ?? -1) - (a.edge_retention ?? -1)) || (b.final_score - a.final_score));
+    }
+    else if (sortVal === "score-desc") filteredTargets.sort((a, b) => b.final_score - a.final_score);
     else if (sortVal === "score-asc") filteredTargets.sort((a, b) => a.final_score - b.final_score);
     else if (sortVal === "pnl-desc") filteredTargets.sort((a, b) => b.metrics.copy_pnl - a.metrics.copy_pnl);
     else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => b.metrics.r20_win_rate - a.metrics.r20_win_rate);
@@ -211,6 +279,51 @@ function formatTraderName(t) {
             subText: addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : ""
         };
     }
+}
+
+function formatShare(value) {
+    // A share nobody measured is not a share of zero.
+    return (value === null || value === undefined) ? "Not measured" : `${(value * 100).toFixed(0)}%`;
+}
+
+function renderTierCell(t) {
+    // The letter alone cannot tell a reader whether a simulation produced it.
+    // A triage grade shown in a Tier column is the whole failure this page is
+    // meant to avoid, so an unsimulated wallet says so instead of showing one.
+    if (t.verdict_source === "simulation" && t.tier) {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">Tier (simulated)</span>
+                <span class="summary-val" style="color: var(--accent-cyan)">${t.tier.split(' ')[0]}</span>
+            </div>
+        `;
+    }
+    return `
+        <div class="summary-cell">
+            <span class="summary-lbl">Tier</span>
+            <span class="summary-val tier-unsimulated" title="No Simulated Copy Run produced a verdict for this wallet. ${t.grade} is its triage grade, which is not a verdict.">Not simulated</span>
+        </div>
+    `;
+}
+
+function renderRetentionCell(t) {
+    const retention = t.edge_retention;
+    if (retention === null || retention === undefined) {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">Edge Retention</span>
+                <span class="summary-val tier-unsimulated">Not simulated</span>
+            </div>
+        `;
+    }
+    return `
+        <div class="summary-cell">
+            <span class="summary-lbl">Edge Retention</span>
+            <span class="summary-val" style="color: ${retention >= 0.7 ? '#10b981' : (retention >= 0.4 ? '#f59e0b' : '#ef4444')}">
+                ${(retention * 100).toFixed(0)}%
+            </span>
+        </div>
+    `;
 }
 
 function renderGrid() {
@@ -280,13 +393,11 @@ function renderGrid() {
                             $${t.metrics.copy_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}
                         </span>
                     </div>
+                    ${renderTierCell(t)}
+                    ${renderRetentionCell(t)}
                     <div class="summary-cell">
-                        <span class="summary-lbl">Grade</span>
-                        <span class="summary-val" style="color: var(--accent-cyan)">${t.grade.split(' ')[0]}</span>
-                    </div>
-                    <div class="summary-cell">
-                        <span class="summary-lbl">Recent 20 Win Rate</span>
-                        <span class="summary-val">${t.metrics.r20_win_rate}%</span>
+                        <span class="summary-lbl">Copyable Window Share</span>
+                        <span class="summary-val">${formatShare(t.copyable_window_share)}</span>
                     </div>
                     <div class="summary-cell">
                         <span class="summary-lbl">Avg Invest</span>
@@ -306,6 +417,40 @@ function renderGrid() {
     }).join("");
 }
 
+function renderBalanceMiss(target) {
+    // Trades the simulation could not follow because the bankroll was already
+    // deployed. Direct evidence of capital exhaustion at this account size,
+    // and the one figure on the page that is about the follower rather than
+    // the target.
+    const host = document.getElementById("modalBalanceMiss");
+    if (!host) return;
+
+    const logs = target.balance_miss_details || [];
+    if (target.verdict_source !== "simulation") {
+        host.innerHTML = `<div class="bm-empty">No Simulated Copy Run, so no per-market record exists.</div>`;
+        return;
+    }
+
+    const missed = logs.filter(l => (l.type || l.status) === "SKIP_NO_BALANCE");
+    if (missed.length === 0) {
+        host.innerHTML = `<div class="bm-ok">✅ Every copyable trade was funded — the bankroll never ran dry.</div>`;
+        return;
+    }
+
+    const rows = missed.slice(0, 12).map(l => `
+        <div class="bm-row">
+            <span class="bm-market">${l.market || l.title || "Unnamed market"}</span>
+            <span class="bm-amount">${l.amount !== undefined ? `$${Number(l.amount).toFixed(2)}` : ""}</span>
+        </div>
+    `).join("");
+
+    host.innerHTML = `
+        <div class="bm-headline">⚠️ ${missed.length} trade${missed.length === 1 ? "" : "s"} missed for lack of balance</div>
+        ${rows}
+        ${missed.length > 12 ? `<div class="bm-empty">…and ${missed.length - 12} more.</div>` : ""}
+    `;
+}
+
 function openModal(idx) {
     currentModalIndex = idx;
     const target = filteredTargets[idx];
@@ -322,8 +467,12 @@ function openModal(idx) {
     const nameInfo = formatTraderName(target);
     document.getElementById("modalTitle").innerText = nameInfo.title;
     document.getElementById("modalAddr").innerText = `${target.address.slice(0, 8)}...${target.address.slice(-6)}`;
-    document.getElementById("modalGradeBadge").innerText = target.grade;
+    // Labelled as triage so the badge is never mistaken for a simulated verdict.
+    document.getElementById("modalGradeBadge").innerText = target.verdict_source === "simulation" && target.tier
+        ? `${target.tier} (simulated)`
+        : `${target.grade} (triage only)`;
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
+    renderBalanceMiss(target);
     document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
     
     // Set correct external profile & platform links

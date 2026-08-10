@@ -14,8 +14,13 @@ def verify_live_server():
         print("  - Cache-Control Header:", headers.get("Cache-Control"))
         assert "no-cache" in headers.get("Cache-Control", ""), "Missing no-cache header!"
         body = resp.read().decode('utf-8')
-        assert "switchTab('screener')" in body, "Missing switchTab in index.html!"
-        assert "/js/app.js?v=1.2.4" in body, "Missing cache-buster v=1.2.4!"
+        assert "/js/app.js?v=1.3.0" in body, "Missing cache-buster v=1.3.0!"
+        # The browser must not carry a second scoring engine.
+        assert "client_score_engine" not in body, "The client-side scoring engine is back!"
+        # Provenance and the simulation-only figures need somewhere to render.
+        assert 'id="provenanceBanner"' in body, "Missing provenance banner in index.html!"
+        assert 'id="modalBalanceMiss"' in body, "Missing Balance Miss container in index.html!"
+        assert "retention-desc" in body, "Missing Edge Retention sort option in index.html!"
         # New latency-distribution layout
         assert "HTTP REST Latency Distribution" in body, "Missing distribution panel header in index.html!"
         assert "id=\"httpAvgVal\"" in body and "id=\"httpBestVal\"" in body and "id=\"httpWorstVal\"" in body, "Missing tri-stat elements in index.html!"
@@ -28,10 +33,10 @@ def verify_live_server():
         # WS card still exists (now compact and a sibling of the panel)
         assert "WebSocket RTT" in body, "Missing 'WebSocket RTT' card label in index.html!"
         assert "Est. WebSocket RTT" not in body, "Old 'Est. WebSocket RTT' label still present!"
-        print("  - PASSED: index.html v=1.2.4 with distribution panel + WS-card.")
+        print("  - PASSED: index.html v=1.3.0: no client engine, provenance banner, balance miss, retention sort.")
 
-    print("\n[TEST 2] Verifying GET /js/app.js?v=1.2.4...")
-    req = urllib.request.Request(f"{base_url}/js/app.js?v=1.2.4")
+    print("\n[TEST 2] Verifying GET /js/app.js?v=1.3.0...")
+    req = urllib.request.Request(f"{base_url}/js/app.js?v=1.3.0")
     with urllib.request.urlopen(req, timeout=5) as resp:
         assert resp.status == 200
         js_body = resp.read().decode('utf-8')
@@ -44,7 +49,7 @@ def verify_live_server():
         assert "renderDistributionPanel(httpStats.min" in js_body, "Missing distribution panel call in runLatencyTest!"
         # WS card handling
         assert "(unavailable)" in js_body, "Missing WS unavailable state handling in JS!"
-        print("  - PASSED: JS v=1.2.4: switchTab/scanner/clearScanData/classifyTier/renderDistributionPanel/WS unavail.")
+        print("  - PASSED: JS v=1.3.0: switchTab/scanner/clearScanData/classifyTier/renderDistributionPanel/WS unavail.")
 
     print("\n[TEST 3] Verifying GET /api/measure_latency...")
     req = urllib.request.Request(f"{base_url}/api/measure_latency")

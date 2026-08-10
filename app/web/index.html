@@ -98,6 +98,7 @@
                 <div class="search-bar">
                     <input type="text" id="searchInput" class="search-input" placeholder="Search by name or address (0x...)...">
                     <select id="sortSelect" class="sort-select">
+                        <option value="retention-desc">Sort by: Highest Edge Retention</option>
                         <option value="score-desc">Sort by: Highest Screener Score</option>
                         <option value="score-asc">Sort by: Lowest Screener Score</option>
                         <option value="pnl-desc">Sort by: Highest Copy PnL</option>
@@ -119,6 +120,8 @@
                     <button id="btnStartScan" class="btn-scan">⚡ Scan Leaderboard API</button>
                     <button id="btnClearData" class="btn-clear-data">🗑️ Clear Data</button>
                 </div>
+
+                <div id="provenanceBanner" class="provenance-banner" hidden></div>
 
                 <div class="wallets-grid" id="walletsGrid">
                     <!-- Grid cards populated dynamically -->
@@ -411,7 +414,7 @@
             <div class="modal-grid">
                 <div class="modal-col-7">
                     <div class="modal-card">
-                        <div class="modal-card-title">📊 9-Parameter Continuous Audit Breakdown</div>
+                        <div class="modal-card-title">📊 Copyability Score Breakdown</div>
                         <div class="param-bar-container" id="paramBarsContainer">
                             <!-- Dynamic parameter bars populated by app.js -->
                         </div>
@@ -422,6 +425,12 @@
                         <div class="modal-card-title">🕸️ Trader Performance Radar</div>
                         <div class="chart-box">
                             <canvas id="radarChartCanvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="modal-card">
+                        <div class="modal-card-title">💸 Balance Miss</div>
+                        <div class="balance-miss-container" id="modalBalanceMiss">
+                            <!-- Populated by app.js from the Simulated Copy Run -->
                         </div>
                     </div>
                 </div>
@@ -448,7 +457,6 @@
         </div>
     </div>
 
-    <script src="/js/client_score_engine.js?v=1.3.0"></script>
     <script src="/js/app.js?v=1.3.0"></script>
 </body>
 </html>

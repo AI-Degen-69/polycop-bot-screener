@@ -77,11 +77,16 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 from pipeline.phase1_scrape_leaderboard import fetch_and_scrape_leaderboard
                 from pipeline.phase2_filter_targets import run_phase2_filter
-                
-                fetch_and_scrape_leaderboard(min_score=60.0)
-                run_phase2_filter()
+                from pipeline.phase3_simulation_rank import run_phase3_simulation_rank
 
-                verified_file = os.path.join(DATA_DIR, "phase2_verified_targets.json")
+                fetch_and_scrape_leaderboard()
+                run_phase2_filter()
+                # Verdicts come from simulated performance, so a rescan that
+                # stopped at triage would leave the page showing the previous
+                # run's simulation beside this run's triage scores.
+                run_phase3_simulation_rank()
+
+                verified_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
                 if os.path.exists(verified_file):
                     with open(verified_file, "r", encoding="utf-8") as f:
                         data = json.load(f)

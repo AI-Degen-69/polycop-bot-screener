@@ -38,6 +38,28 @@ def assign_simulated_tier(edge_retention: Optional[float], sim_pnl_10: float) ->
     else:
         return "F-Tier / REJECT"
 
+def _carry_through_triage(target: Dict[str, Any]) -> Dict[str, Any]:
+    """Everything triage already established about a wallet, passed along intact.
+
+    Phase 3 publishes the feed the web app reads, so anything it drops here
+    disappears from the page. Activity, the score breakdown and the bankroll
+    analysis are all triage's work and none of them is invalidated by running a
+    simulation on top, so they travel with the row rather than forcing the page
+    to fetch and join two files.
+    """
+    return {
+        "address": target.get("address"),
+        "name": target.get("name"),
+        "triage_copyability_score": target.get("final_score"),
+        "triage_grade": target.get("grade"),
+        "is_hidden_gem": target.get("is_hidden_gem"),
+        "activity": target.get("activity"),
+        "breakdown": target.get("breakdown"),
+        "bankroll_analysis": target.get("bankroll_analysis"),
+        "metrics": target.get("metrics"),
+    }
+
+
 def run_phase3_simulation_rank(
     targets: Optional[List[Dict[str, Any]]] = None,
     profile=None,
@@ -102,32 +124,40 @@ def run_phase3_simulation_rank(
         parsed_10 = parse_run_mock_response(res_10) if res_10 else {}
         window_share = calculate_copyable_window_share(res_10) if res_10 else None
 
-        entry = {
-            "address": addr,
-            "name": target.get("name"),
-            "triage_copyability_score": target.get("final_score"),
+        entry = _carry_through_triage(target)
+        entry.update({
+            # The tier a simulation produced, labelled as such. A reader cannot
+            # tell a simulated verdict from a triage grade by looking at the
+            # letter, so the provenance travels beside it rather than being
+            # inferred from which fields happen to be populated.
+            "verdict_source": "simulation",
+            "tier": sim_tier,
             "edge_retention": round(retention, 4) if retention is not None else None,
-            "simulated_tier": sim_tier,
             "simulated_copy_pnl_10": round(pnl_10, 2),
             "copyable_window_share": round(window_share, 4) if window_share is not None else None,
             "balance_miss_details": parsed_10.get("logs", []),
             "pnl_by_slippage_level": sweep_out.get("pnl_by_level"),
-            "metrics": target.get("metrics")
-        }
+        })
         simulated_results.append(entry)
 
     # Error Fallback: if endpoint failed, fall back to triage copyability score ordering
     if reduced_confidence:
         simulated_results = []
         for target in targets:
-            entry = {
-                "address": target.get("address"),
-                "name": target.get("name"),
-                "triage_copyability_score": target.get("final_score"),
+            entry = _carry_through_triage(target)
+            entry.update({
+                # No simulation ran, so there is no simulated tier. The triage
+                # grade is still here under its own name; presenting it as a
+                # simulated verdict would be the same letter meaning something
+                # weaker, which is exactly the confusion this feed must not ship.
+                "verdict_source": "triage",
+                "tier": None,
                 "edge_retention": None,
-                "simulated_tier": target.get("grade"),
-                "metrics": target.get("metrics")
-            }
+                "simulated_copy_pnl_10": None,
+                "copyable_window_share": None,
+                "balance_miss_details": [],
+                "pnl_by_slippage_level": None,
+            })
             simulated_results.append(entry)
         simulated_results.sort(key=lambda x: x.get("triage_copyability_score", 0.0), reverse=True)
     else:

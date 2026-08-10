@@ -1244,3 +1244,102 @@ header {
     }
 }
 
+
+/* --- Provenance: what produced the numbers on this page --- */
+/* A verdict with no visible origin invites the reader to assume the strongest
+   possible one, so the banner states the profile and says plainly when the
+   ordering came from triage rather than a simulation. */
+.provenance-banner {
+    margin: 0 0 1.25rem;
+    padding: 0.85rem 1.1rem;
+    border: 1px solid rgba(34, 211, 238, 0.25);
+    border-left: 3px solid var(--accent-cyan, #22d3ee);
+    border-radius: 8px;
+    background: rgba(34, 211, 238, 0.06);
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.provenance-banner.degraded {
+    border-color: rgba(245, 158, 11, 0.35);
+    border-left-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.provenance-headline {
+    font-weight: 600;
+    color: #e5e7eb;
+}
+
+.provenance-detail {
+    margin-top: 0.35rem;
+    color: #cbd5e1;
+}
+
+.provenance-profile {
+    margin-top: 0.5rem;
+    color: #9ca3af;
+    font-size: 0.8rem;
+}
+
+.provenance-fingerprint {
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: rgba(148, 163, 184, 0.15);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    color: #94a3b8;
+}
+
+/* Distinguished from a real verdict by weight and colour, not only by wording. */
+.tier-unsimulated {
+    color: #94a3b8;
+    font-style: italic;
+    font-weight: 500;
+}
+
+/* --- Balance Miss: trades the bankroll could not fund --- */
+.balance-miss-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+}
+
+.bm-headline {
+    color: #f59e0b;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.bm-ok {
+    color: #10b981;
+}
+
+.bm-empty {
+    color: #9ca3af;
+    font-style: italic;
+}
+
+.bm-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 5px;
+    background: rgba(148, 163, 184, 0.07);
+}
+
+.bm-market {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #cbd5e1;
+}
+
+.bm-amount {
+    flex-shrink: 0;
+    color: #f59e0b;
+    font-variant-numeric: tabular-nums;
+}
