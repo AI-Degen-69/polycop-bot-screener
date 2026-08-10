@@ -36,8 +36,8 @@ if SRC_DIR not in sys.path:
 
 from screener.score_wallets import (  # noqa: E402
     GEM_SITE_SCORE_MAX,
-    MARKETS_GATE,
     MODELLED_COPY_PNL_MIN_USD,
+    TRACK_RECORD_LENGTH_MIN_MARKETS,
     PL_RATIO_GATE,
     SCORING_SPEC,
 )
@@ -123,8 +123,8 @@ GATE_AND_PROFILE_LABELS = [
     },
     {
         "relpath": os.path.join("app", "web", "index.html"),
-        "description": "Markets Sample gate tooltip value",
-        "expected": f"Rejects &lt; {MARKETS_GATE:.0f} (lucky streak risk)",
+        "description": "Track Record Length gate tooltip value",
+        "expected": f"Rejects &lt; {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f} (lucky streak risk)",
         "pattern": r"Rejects &lt; \d+ \(lucky streak risk\)",
     },
     {

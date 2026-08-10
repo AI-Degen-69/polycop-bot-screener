@@ -50,8 +50,14 @@ HEDGED_RATE_GATE_PCT = 3.0
 # Profit/Loss Ratio gate: winning pennies, losing dollars.
 PL_RATIO_GATE = 0.3
 
-# Markets Sample gate: fewer markets and the record is a streak, not a track record.
-MARKETS_GATE = 20
+# Track Record Length gate: fewer markets and the record is a streak, not a
+# track record. Measured in lifetime markets — the only lifetime record-depth
+# field the leaderboard provides. The research's ~50-position bar (issue #29)
+# translates to ~23 markets at the observed ~2.2 trades-per-market density;
+# the floor of 25 rounds that up conservatively. The daily activity series is
+# a rolling window that cannot measure lifetime trades, so the lifetime field
+# is the honest measurement (issue #30 re-scope).
+TRACK_RECORD_LENGTH_MIN_MARKETS = 25
 
 # Divergence gate: a dead edge must not be carried by history. Rejects a wallet
 # whose recent form is negative while lifetime performance is strongly positive.
@@ -149,9 +155,9 @@ SCORING_SPEC = {
             "reason": "winning pennies, losing dollars",
         },
         {
-            "name": "Markets Sample",
-            "condition": f"< {MARKETS_GATE:.0f}",
-            "reason": "a streak, not a track record",
+            "name": "Track Record Length",
+            "condition": f"< {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f} lifetime markets",
+            "reason": "a short record is a streak, not a track record; measured in lifetime markets because the daily activity series is a rolling window that cannot measure lifetime trades",
         },
         {
             "name": "Whale Avg Invest",
@@ -232,7 +238,7 @@ SCORING_SPEC = {
         {
             "name": "Markets Sample",
             "points": 3,
-            "zero": f"< {MARKETS_GATE:.0f}",
+            "zero": f"< {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f}",
             "full": ">= 200",
             "note": "",
             "radar": "Markets",
@@ -373,8 +379,8 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         rejection_reasons.append(f"Hedged Rate {hedged}% > {HEDGED_RATE_GATE_PCT}%")
     if pl_ratio < PL_RATIO_GATE:
         rejection_reasons.append(f"P/L Ratio {pl_ratio:.2f}x < {PL_RATIO_GATE:.1f}x")
-    if mkts < MARKETS_GATE:
-        rejection_reasons.append(f"Short Track Record ({int(mkts)} markets < {MARKETS_GATE:.0f} min threshold)")
+    if mkts < TRACK_RECORD_LENGTH_MIN_MARKETS:
+        rejection_reasons.append(f"Track Record Length ({int(mkts)} lifetime markets < {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f})")
     if avg_inv > WHALE_AVG_INVEST_LIMIT_USD:
         rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > ${WHALE_AVG_INVEST_LIMIT_USD:.0f})")
     if r20_pnl < 0 and actual_pnl > DIVERGENCE_LIFETIME_PNL_USD:
@@ -470,12 +476,12 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     breakdown["hedged_control"] = round(hedged_score, 2)
 
     # 9. Markets Sample (3 pts)
-    if mkts < MARKETS_GATE:
+    if mkts < TRACK_RECORD_LENGTH_MIN_MARKETS:
         mkt_score = 0.0
     elif mkts >= 200:
         mkt_score = 3.0
     else:
-        mkt_score = 3.0 * ((mkts - MARKETS_GATE) / (200.0 - MARKETS_GATE))
+        mkt_score = 3.0 * ((mkts - TRACK_RECORD_LENGTH_MIN_MARKETS) / (200.0 - TRACK_RECORD_LENGTH_MIN_MARKETS))
     score += mkt_score
     breakdown["markets_sample"] = round(mkt_score, 2)
 

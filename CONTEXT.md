@@ -132,6 +132,13 @@ identical in lifetime numbers.
 **Activity Recency**:
 How recently a target last traded, measured against data collection time rather than read time.
 
+**Track Record Length**:
+The depth of a target's lifetime trading record, measured in the markets it has
+traded. A record that cannot be measured is not a record: a wallet whose trade
+series is unreadable is rejected, not guessed around. Depth is distinct from
+recency — a long record can be stale, and a fresh one can be short.
+_Avoid_: sample size, history length, trade count
+
 ### Simulation
 
 **Simulated Copy Run**:

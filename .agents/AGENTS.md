@@ -24,7 +24,7 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 | Slippage Cost Rate | `> 5.0% modelled` | roughly 21% real under the Friction Realism Multiplier (ADR 0001) |
 | Hedged Rate | `> 3.0%` | market-making signature and doubled friction legs |
 | Profit/Loss Ratio | `< 0.3` | winning pennies, losing dollars |
-| Markets Sample | `< 20` | a streak, not a track record |
+| Track Record Length | `< 25 lifetime markets` | a short record is a streak, not a track record; measured in lifetime markets because the daily activity series is a rolling window that cannot measure lifetime trades |
 | Whale Avg Invest | `> $200` | a typical trade that dwarfs the bankroll cannot be mirrored |
 | Divergence | `r20_pnl < $0 while actual_pnl > $1,000` | a dead edge must not be carried by history |
 
@@ -40,7 +40,7 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 | Profit/Loss Ratio | 9 | <= 0.3 | >= 3.0 |
 | Sizing Fit | 6 | outside the Copyable Trade Window | at the window midpoint — peak derived from the Copy Execution Profile, never hand-picked |
 | Hedged Control | 6 | >= 3.0% | 0% |
-| Markets Sample | 3 | < 20 | >= 200 |
+| Markets Sample | 3 | < 25 | >= 200 |
 | Capital Efficiency | 2 | 0 | >= 30 PnL/volume ratio |
 
 #### Copyability Score Tier Bands (triage only — verdicts come from simulation)

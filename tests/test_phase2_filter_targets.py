@@ -230,7 +230,7 @@ class TestTheScaleIsNotInflated(unittest.TestCase):
             roi=0.0,
             r20_pnl=0.0,
             avg_invest=10.0,
-            markets_traded=20,
+            markets_traded=25,
             avg_profit_loss_ratio=0.3,
             hedged_pct=3.0,
         )

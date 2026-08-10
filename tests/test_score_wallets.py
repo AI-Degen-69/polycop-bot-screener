@@ -13,6 +13,7 @@ from screener.score_wallets import (
     TIER_B_MIN,
     TIER_C_MIN,
     TIER_S_MIN,
+    TRACK_RECORD_LENGTH_MIN_MARKETS,
     calculate_bankroll_optimized_score,
     calculate_edge_retention,
     grade_for_score,
@@ -83,6 +84,40 @@ class TestScoreWalletsEngine(unittest.TestCase):
         metrics = {"polycop_site_score": 75.0, "actual_pnl": 5000.0, "copy_pnl": 4500.0, "r20_pnl": -200.0}
         res = calculate_bankroll_optimized_score(metrics)
         self.assertTrue(any("Divergence Gate" in r for r in res["rejection_reasons"]))
+
+    def test_track_record_length_rejects_below_the_lifetime_market_floor(self):
+        """Issue #30: a wallet under the lifetime-markets floor is rejected.
+
+        The gate is measured on the lifetime markets field, not the rolling
+        daily activity series: that series is hard-capped at 14 rows, so a
+        slow steady trader with a real record would be wrongly rejected and a
+        one-week frenzy would pass. Lifetime markets is the only lifetime
+        record-depth field the leaderboard provides.
+        """
+        res = calculate_bankroll_optimized_score(_clean_metrics(markets=24))
+        self.assertTrue(any("Track Record Length" in r for r in res["rejection_reasons"]))
+
+    def test_track_record_length_passes_at_and_above_the_floor(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(markets=25))
+        self.assertFalse(any("Track Record Length" in r for r in res["rejection_reasons"]))
+
+    def test_track_record_length_absence_rejects(self):
+        """A wallet whose trade record cannot be measured is rejected.
+
+        The engine defaults an absent markets figure to zero, which sits below
+        the floor — an unmeasurable record is not a record (the Markets Sample
+        gate's absence semantics, carried into the re-scoped gate).
+        """
+        absent = _clean_metrics()
+        absent.pop("markets")
+        res = calculate_bankroll_optimized_score(absent)
+        self.assertTrue(any("Track Record Length" in r for r in res["rejection_reasons"]))
+
+    def test_the_track_record_length_floor_is_the_recalibrated_constant(self):
+        """The research's ~50-position bar maps to ~23 lifetime markets at the
+        observed ~2.2 trades-per-market density, rounded conservatively to 25;
+        the floor must not drift."""
+        self.assertEqual(TRACK_RECORD_LENGTH_MIN_MARKETS, 25.0)
 
 
 def _clean_metrics(**overrides):
