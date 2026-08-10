@@ -107,8 +107,6 @@ source of truth) — never edit this section by hand, and CI fails if it drifts 
 
 <!-- SCORING-SPEC:END -->
 
-
-
 ---
 
 ## 🛠️ Project Structure

@@ -5,6 +5,7 @@ are regenerated. These prove the check can fail — the acceptance criterion for
 ticket #11 was that a deliberate mismatch fails it.
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -51,6 +52,143 @@ class TestTheCheckFailsOnADeliberateMismatch(unittest.TestCase):
     def test_a_missing_block_is_detected(self):
         doc = self._tampered_doc(tampered_block="# nothing here\n")
         self.assertEqual(scoring_docs.check([doc]), 1)
+
+
+class TestWebUiLabelsAreRenderedFromTheCode(unittest.TestCase):
+    """The tier floors and gem threshold embedded in the web UI are rendered
+    from the same constants as the markdown tables, so a band recalibration
+    cannot silently leave a stale label on the page.
+    """
+
+    def test_the_shipped_assets_carry_the_rendered_labels(self):
+        self.assertEqual(
+            scoring_docs.check_ui(), [],
+            "every UI label must match the SCORING_SPEC constants",
+        )
+
+    def test_each_label_entry_has_a_matching_expected_and_pattern(self):
+        for label in scoring_docs.UI_LABELS:
+            with self.subTest(description=label["description"]):
+                path = os.path.join(PROJECT_ROOT, label["relpath"])
+                with open(path, "r", encoding="utf-8") as f:
+                    text = f.read()
+                # The pattern must locate the current expected value, so that
+                # `generate` can swap a stale number for the rendered one.
+                self.assertRegex(text, label["pattern"])
+                self.assertIn(label["expected"], text)
+
+    def _stale_variant(self, index):
+        """The label entry's expected string with its value swapped to 99, so a
+        tamper stays meaningful no matter what the constants currently are."""
+        return re.sub(r"\d+", "99", scoring_docs.UI_LABELS[index]["expected"])
+
+    def test_a_stale_stat_pill_label_fails_the_check(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        doc = os.path.join(tmp, "index.html")
+        real = os.path.join(PROJECT_ROOT, "app", "web", "index.html")
+        with open(real, "r", encoding="utf-8") as f:
+            tampered = f.read().replace(
+                scoring_docs.UI_LABELS[0]["expected"], self._stale_variant(0)
+            )
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write(tampered)
+        self.assertEqual(
+            scoring_docs.check(ui_overrides={
+                os.path.join("app", "web", "index.html"): doc
+            }),
+            1,
+        )
+
+    def test_a_stale_gem_tooltip_label_fails_the_check(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        doc = os.path.join(tmp, "app.js")
+        real = os.path.join(PROJECT_ROOT, "app", "web", "js", "app.js")
+        with open(real, "r", encoding="utf-8") as f:
+            tampered = f.read().replace(
+                scoring_docs.UI_LABELS[3]["expected"], self._stale_variant(3)
+            )
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write(tampered)
+        self.assertEqual(
+            scoring_docs.check(ui_overrides={
+                os.path.join("app", "web", "js", "app.js"): doc
+            }),
+            1,
+        )
+
+    def test_a_stale_duplicate_in_the_same_format_fails_the_check(self):
+        # The expected string still exists (so a plain substring check would
+        # pass), but a second label in the same format carries a stale value.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        doc = os.path.join(tmp, "index.html")
+        real = os.path.join(PROJECT_ROOT, "app", "web", "index.html")
+        with open(real, "r", encoding="utf-8") as f:
+            tampered = f.read().replace(
+                scoring_docs.UI_LABELS[0]["expected"],
+                scoring_docs.UI_LABELS[0]["expected"] + " " + self._stale_variant(0),
+            )
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write(tampered)
+        self.assertEqual(
+            scoring_docs.check(ui_overrides={
+                os.path.join("app", "web", "index.html"): doc
+            }),
+            1,
+        )
+
+
+class TestGenerateIsIdempotent(unittest.TestCase):
+    """generate() on a synced tree must be a byte-level no-op, and a fresh doc
+    must settle on the very first run — the regression this locks in is a
+    generator that appended one newline past the END marker every run.
+    """
+
+    def _ui_copies(self, tmp):
+        ui_overrides = {}
+        for label in scoring_docs.UI_LABELS:
+            if label["relpath"] in ui_overrides:
+                continue
+            src = os.path.join(PROJECT_ROOT, label["relpath"])
+            dst = os.path.join(tmp, os.path.basename(label["relpath"]))
+            shutil.copy(src, dst)
+            ui_overrides[label["relpath"]] = dst
+        return ui_overrides
+
+    def test_generate_is_a_noop_on_a_synced_tree(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        ui_overrides = self._ui_copies(tmp)
+        docs = []
+        for relpath in (".agents/AGENTS.md", "README.md"):
+            src = os.path.join(PROJECT_ROOT, relpath)
+            dst = os.path.join(tmp, os.path.basename(relpath))
+            shutil.copy(src, dst)
+            docs.append(dst)
+        before = {
+            p: open(p, encoding="utf-8").read()
+            for p in docs + list(ui_overrides.values())
+        }
+        scoring_docs.generate(doc_paths=docs, ui_overrides=ui_overrides)
+        for path, content in before.items():
+            with self.subTest(path=os.path.basename(path)):
+                with open(path, encoding="utf-8") as f:
+                    self.assertEqual(f.read(), content)
+
+    def test_generate_settles_a_fresh_doc_on_the_first_run(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        ui_overrides = self._ui_copies(tmp)
+        doc = os.path.join(tmp, "FRESH.md")
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write("# Fresh doc\n\nIntro text.\n")
+        scoring_docs.generate(doc_paths=[doc], ui_overrides=ui_overrides)
+        first = open(doc, encoding="utf-8").read()
+        scoring_docs.generate(doc_paths=[doc], ui_overrides=ui_overrides)
+        with open(doc, encoding="utf-8") as f:
+            self.assertEqual(f.read(), first)
 
 
 class TestContextMdStaysThresholdFree(unittest.TestCase):

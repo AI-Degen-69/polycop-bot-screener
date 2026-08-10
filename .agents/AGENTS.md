@@ -56,8 +56,6 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 
 <!-- SCORING-SPEC:END -->
 
-
-
 **Data Evidence Requirement**: Present the numerical breakdown for every weighted parameter alongside the final grade, as the engine reports it in `breakdown`.
 
 ### Response Formatting Rules
