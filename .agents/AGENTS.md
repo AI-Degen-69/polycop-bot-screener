@@ -20,7 +20,7 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 | Gate | Condition | Why |
 | :--- | :--- | :--- |
 | PolyCop Site Score sanity floor | `< 40 / 100` | stops manually pasted garbage from being scored once the leaderboard pre-filter is gone |
-| Toxic Copy Poison | `Copy PnL < $0` | a modelled copy that loses money is not a target |
+| Toxic Copy Poison | `Modelled Copy PnL < $0` | a modelled copy that loses money is not a target |
 | Slippage Cost Rate | `> 5.0% modelled` | roughly 21% real under the Friction Realism Multiplier (ADR 0001) |
 | Hedged Rate | `> 3.0%` | market-making signature and doubled friction legs |
 | Profit/Loss Ratio | `< 0.3` | winning pennies, losing dollars |
@@ -32,15 +32,14 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 
 | Parameter | Points | Zero points | Full marks |
 | :--- | :---: | :--- | :--- |
-| Edge-to-Friction Ratio | 22 | <= 1.0 (break-even) | >= 3.0 — edge per dollar of friction; the cheapest disqualifying arithmetic runs first |
-| Slippage Cost Rate | 15 | >= 5.0% | <= 1.0% — modelled, before the Friction Realism Multiplier |
-| Drawdown Depth | 12 | >= 0.50 of peak | 0.0 — from the lifetime equity curve |
-| Copyable Window Share | 10 | 0% | 100% — share of trades the Copyable Trade Window admits |
-| Recent Form | 10 | PnL <= $0 or slip unmeasured | >= 100% return over the recent-20 window at 0% slip — return on deployed capital, judged against the friction it came through (ADR 0004) |
-| Daily Green Rate | 8 | < 40% or fewer than 10 observed days | >= 85% — copy-adjusted, measured from real per-day simulated results |
-| Profit/Loss Ratio | 8 | <= 0.3 | >= 3.0 |
-| Sizing Fit | 5 | outside the Copyable Trade Window | at the window midpoint — peak derived from the Copy Execution Profile, never hand-picked |
-| Hedged Control | 5 | >= 3.0% | 0% |
+| Edge-to-Friction Ratio | 24 | <= 1.0 (break-even) | >= 3.0 — edge per dollar of friction; the cheapest disqualifying arithmetic runs first |
+| Slippage Cost Rate | 17 | >= 5.0% | <= 1.0% — modelled, before the Friction Realism Multiplier |
+| Drawdown Depth | 13 | >= 0.50 of peak | 0.0 — from the lifetime equity curve |
+| Recent Form | 11 | PnL <= $0 or slip unmeasured | >= 100% return over the recent-20 window at 0% slip — return on deployed capital, judged against the friction it came through (ADR 0004) |
+| Daily Green Rate | 9 | < 40% or fewer than 10 observed days | >= 85% — copy-adjusted, measured from real per-day simulated results |
+| Profit/Loss Ratio | 9 | <= 0.3 | >= 3.0 |
+| Sizing Fit | 6 | outside the Copyable Trade Window | at the window midpoint — peak derived from the Copy Execution Profile, never hand-picked |
+| Hedged Control | 6 | >= 3.0% | 0% |
 | Markets Sample | 3 | < 20 | >= 200 |
 | Capital Efficiency | 2 | 0 | >= 30 PnL/volume ratio |
 
@@ -48,11 +47,11 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 
 | Tier | Score |
 | :--- | :--- |
-| S-Tier (God-Tier Target) | &ge; 72 |
-| A-Tier (Strong Copy Target) | &ge; 65 |
-| B-Tier (Moderate Copy Target) | &ge; 60 |
-| C-Tier (High Risk / Volatile) | &ge; 50 |
-| F-Tier (Toxic / Rejection) | < 50 |
+| S-Tier (God-Tier Target) | &ge; 80 |
+| A-Tier (Strong Copy Target) | &ge; 71 |
+| B-Tier (Moderate Copy Target) | &ge; 65 |
+| C-Tier (High Risk / Volatile) | &ge; 56 |
+| F-Tier (Toxic / Rejection) | < 56 |
 
 #### Simulated Verdict Tier Bands (Edge Retention — the verdict)
 

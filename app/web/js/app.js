@@ -103,15 +103,24 @@ function renderProvenanceBanner(data) {
 
     if (data.reduced_confidence) {
         banner.className = "provenance-banner degraded";
+        // A degraded scan can be partial: wallets simulated before the outage
+        // keep their verdicts, and only the unreached ones fall back to triage
+        // order. The banner must not tell a reader that no tier on the page is
+        // simulated when some are.
+        const anySimulated = (data.simulated_targets || []).some(t => t.verdict_source === "simulation");
+        const headline = anySimulated
+            ? "⚠️ Simulation interrupted — some wallets are triage order only"
+            : "⚠️ Showing triage order, not simulated results";
+        // fallback_reason comes from caught sweep exceptions and failed fetch
+        // errors, so it must be escaped before the banner interpolates it
+        // (CodeRabbit review, PR #28).
+        const fallbackReason = data.fallback_reason ? `: ${escapeHtml(data.fallback_reason)}` : "";
+        const detail = anySimulated
+            ? `The endpoint stopped answering mid-scan${fallbackReason}. Wallets simulated before the outage keep their verdicts; the rest are ordered by Copyability Score, which triages candidates but is not a verdict.`
+            : `The simulation could not run${fallbackReason}. Wallets below are ordered by Copyability Score, which triages candidates but is not a verdict. No Tier on this page was produced by a simulation.`;
         banner.innerHTML = `
-            <div class="provenance-headline">
-                ⚠️ Showing triage order, not simulated results
-            </div>
-            <div class="provenance-detail">
-                The simulation could not run${data.fallback_reason ? `: ${data.fallback_reason}` : ""}.
-                Wallets below are ordered by Copyability Score, which triages candidates
-                but is not a verdict. No Tier on this page was produced by a simulation.
-            </div>
+            <div class="provenance-headline">${headline}</div>
+            <div class="provenance-detail">${detail}</div>
             ${profileLine}
         `;
     } else {
@@ -260,7 +269,13 @@ function filterAndRender() {
     }
     else if (sortVal === "score-desc") filteredTargets.sort((a, b) => b.final_score - a.final_score);
     else if (sortVal === "score-asc") filteredTargets.sort((a, b) => a.final_score - b.final_score);
-    else if (sortVal === "pnl-desc") filteredTargets.sort((a, b) => b.metrics.copy_pnl - a.metrics.copy_pnl);
+    else if (sortVal === "pnl-desc") {
+        // The verdict's PnL is the simulated figure. An unsimulated wallet has
+        // no simulated PnL to rank on, so it sorts below every simulated
+        // wallet rather than being treated as a zero.
+        filteredTargets.sort((a, b) =>
+            ((b.simulated_copy_pnl_10 ?? -Infinity) - (a.simulated_copy_pnl_10 ?? -Infinity)));
+    }
     else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => b.metrics.r20_win_rate - a.metrics.r20_win_rate);
     else if (sortVal === "polycop-desc") filteredTargets.sort((a, b) => b.metrics.polycop_site_score - a.metrics.polycop_site_score);
     else if (sortVal === "activity-desc") filteredTargets.sort((a, b) => activityHours(a) - activityHours(b));
@@ -293,6 +308,37 @@ function formatTraderName(t) {
 function formatShare(value) {
     // A share nobody measured is not a share of zero.
     return (value === null || value === undefined) ? "Not measured" : `${(value * 100).toFixed(0)}%`;
+}
+
+function renderVerdictMetricCell(t, field, label, format) {
+    // A verdict figure no simulation produced is not a figure of zero: the
+    // row says so, telling a triage-only row from a measured verdict row.
+    // `format` renders the measured value (percent by default; PnL passes a
+    // dollar formatter).
+    const fmt = format || ((v) => `${v}%`);
+    const val = t[field];
+    if (t.verdict_source !== "simulation") {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">${label}</span>
+                <span class="summary-val tier-unsimulated">Not simulated</span>
+            </div>
+        `;
+    }
+    if (val === null || val === undefined) {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">${label}</span>
+                <span class="summary-val tier-unsimulated">Not measured</span>
+            </div>
+        `;
+    }
+    return `
+        <div class="summary-cell">
+            <span class="summary-lbl">${label}</span>
+            <span class="summary-val">${fmt(val)}</span>
+        </div>
+    `;
 }
 
 function renderTierCell(t) {
@@ -383,7 +429,7 @@ function renderGrid() {
                 <span class="badge-gem">💎 GEM</span>
                 <div class="gem-tooltip-text">
                     <strong>💎 Hidden Gem Detected!</strong><br>
-                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;65)</strong>!
+                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;71)</strong>!
                 </div>
             </div>
         ` : '';
@@ -415,17 +461,21 @@ function renderGrid() {
                 </div>
                 <div class="card-metrics-summary">
                     <div class="summary-cell">
-                        <span class="summary-lbl">Backtest Copy PnL</span>
+                        <span class="summary-lbl">Modelled Copy PnL</span>
                         <span class="summary-val" style="color: ${t.metrics.copy_pnl >= 0 ? '#10b981' : '#ef4444'}">
                             $${t.metrics.copy_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}
                         </span>
                     </div>
+                    ${renderVerdictMetricCell(t, 'simulated_copy_pnl_10', 'Simulated Copy PnL',
+                        (v) => '$' + v.toLocaleString('en-US', {minimumFractionDigits: 2}))}
                     ${renderTierCell(t)}
                     ${renderRetentionCell(t)}
                     <div class="summary-cell">
                         <span class="summary-lbl">Copyable Window Share</span>
                         <span class="summary-val">${formatShare(t.copyable_window_share)}</span>
                     </div>
+                    ${renderVerdictMetricCell(t, 'simulated_daily_green_rate', 'Simulated Daily Green')}
+                    ${renderVerdictMetricCell(t, 'simulated_max_drawdown', 'Simulated Drawdown')}
                     <div class="summary-cell">
                         <span class="summary-lbl">Avg Invest</span>
                         <span class="summary-val">$${t.metrics.avg_invest}</span>
@@ -480,6 +530,40 @@ function renderBalanceMiss(target) {
     `;
 }
 
+function renderSkipReasons(target) {
+    // The simulation's decision log, condensed to the refusals — the entries
+    // where an entry signal did not become a copy. The message names the
+    // failing filter, so a reader sees why a trade was skipped rather than
+    // inferring it (spec #13).
+    const host = document.getElementById("modalSkipReasons");
+    if (!host) return;
+
+    if (target.verdict_source !== "simulation") {
+        host.innerHTML = `<div class="bm-empty">No Simulated Copy Run, so no skip log exists.</div>`;
+        return;
+    }
+
+    const reasons = target.skip_reasons || [];
+    if (reasons.length === 0) {
+        host.innerHTML = `<div class="bm-ok">✅ Every entry signal was copied — nothing was skipped.</div>`;
+        return;
+    }
+
+    const actionLabels = { SKIP_FILTER: "Window refused", SKIP_CAP: "Risk cap" };
+    const rows = reasons.slice(0, 12).map(r => `
+        <div class="bm-row sr-row">
+            <span class="bm-market">${escapeHtml(actionLabels[r.action] || r.action)}</span>
+            <span class="bm-amount">${escapeHtml(r.msg || "")}</span>
+        </div>
+    `).join("");
+
+    host.innerHTML = `
+        <div class="bm-headline">⚠️ ${reasons.length} signal${reasons.length === 1 ? "" : "s"} did not become a copy</div>
+        ${rows}
+        ${reasons.length > 12 ? `<div class="bm-empty">…and ${reasons.length - 12} more.</div>` : ""}
+    `;
+}
+
 function openModal(idx) {
     currentModalIndex = idx;
     const target = filteredTargets[idx];
@@ -503,6 +587,7 @@ function openModal(idx) {
     document.getElementById("modalRankBadge").innerText = target.scan_rank ? `#${target.scan_rank}` : "—";
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
     renderBalanceMiss(target);
+    renderSkipReasons(target);
     document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
     
     // Set correct external profile & platform links

@@ -124,6 +124,13 @@ class TestTheNewFiguresAreRendered(unittest.TestCase):
         self.assertIn("retention-desc", self.index)
         self.assertIn("retention-desc", self.app_js)
 
+    def test_the_pnl_sort_reads_the_simulated_figure_not_the_leaderboard(self):
+        # The verdict page orders by the simulation's PnL, not the leaderboard's
+        # modelled figure — the same provenance rule as every other verdict metric.
+        self.assertIn("simulated_copy_pnl_10", self.app_js)
+        self.assertIn("Highest Simulated Copy PnL", self.index)
+        self.assertNotIn("b.metrics.copy_pnl - a.metrics.copy_pnl", self.app_js)
+
 
 class TestUnmeasuredFiguresAreNotShownAsZero(unittest.TestCase):
     def test_an_absent_share_reads_as_unmeasured(self):
@@ -131,6 +138,27 @@ class TestUnmeasuredFiguresAreNotShownAsZero(unittest.TestCase):
         match = re.search(r"function formatShare\(value\)\s*\{(.+?)\n\}", app_js, re.S)
         self.assertIsNotNone(match, "formatShare should exist to handle absent figures")
         self.assertIn("Not measured", match.group(1))
+
+
+class TestTheDegradeBannerEscapesItsFailureText(unittest.TestCase):
+    """fallback_reason is populated from caught sweep exceptions and failed
+    endpoint responses, so it must go through escapeHtml before the banner
+    interpolates it into innerHTML — never raw (CodeRabbit, PR #28)."""
+
+    def setUp(self):
+        self.app_js = _read(APP_JS)
+        banner = self.app_js.split("data.reduced_confidence", 1)[1]
+        self.banner = banner.split("banner.hidden = false", 1)[0]
+
+    def test_the_fallback_reason_is_escaped_before_interpolation(self):
+        self.assertIn("escapeHtml(data.fallback_reason)", self.banner)
+
+    def test_no_raw_interpolation_of_the_fallback_reason_survives(self):
+        self.assertNotRegex(
+            self.banner,
+            r"\$\{data\.fallback_reason\}",
+            "the raw reason must never reach innerHTML unescaped",
+        )
 
 
 if __name__ == "__main__":

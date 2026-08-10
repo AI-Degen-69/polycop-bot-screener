@@ -24,7 +24,6 @@ from pipeline.phase2_filter_targets import run_phase2_filter
 MEASURED_PARAMETERS = {
     "edge_to_friction": "Edge-to-Friction",
     "drawdown_depth": "Drawdown Depth",
-    "copyable_window_share": "Copyable Window Share",
     "daily_green_rate": "Daily Green Rate",
 }
 
@@ -123,15 +122,21 @@ class TestMeasuredParametersReachTheEngine(unittest.TestCase):
         self.assertAlmostEqual(self.target["metrics"]["days_win_rate"], 83.33, places=1)
 
 
-class TestWindowShareReachesTheEngineWhenSimulated(unittest.TestCase):
-    """The other three parameters have source data on every wallet; this one
-    only exists once a Simulated Copy Run has produced decision logs. Without a
-    positive case, a wiring error that never yields a value looks identical to a
-    wallet that legitimately has none."""
+class TestWindowShareIsSimulationOnly(unittest.TestCase):
+    """ADR 0006: a stale run_mock payload on a leaderboard profile must not
+    feed triage scoring.
+
+    Copyable Window Share moved off the triage table because a leaderboard
+    profile cannot measure it; the value only exists after Phase 3 simulates
+    the wallet. If a Phase 1 profile ever carries a leftover `run_mock_response`
+    (the PR #22 footgun), the triage phase must ignore it — a stale simulation
+    result silently scoring ten points is exactly the wrong answer this change
+    exists to prevent.
+    """
 
     def setUp(self):
         simulated = _profile(
-            "0xsimulated",
+            "0xstale",
             run_mock_response={
                 "sim_total_pnl": 240.0,
                 # Ten target entries, six of which the window admitted, plus
@@ -152,12 +157,15 @@ class TestWindowShareReachesTheEngineWhenSimulated(unittest.TestCase):
         self.assertEqual(len(out["verified_targets"]), 1, "fixture wallet was rejected")
         self.target = out["verified_targets"][0]
 
-    def test_the_decision_logs_produce_a_measured_window_share(self):
-        self.assertAlmostEqual(self.target["copyable_window_share"], 0.6, places=4)
+    def test_a_stale_run_mock_payload_does_not_score_at_triage(self):
+        # The old wiring scored six of ten points from this exact payload.
+        self.assertNotIn("window_share", self.target["breakdown"])
+        self.assertNotIn("Copyable Window Share",
+                         self.target.get("breakdown_labels", {}).values())
 
-    def test_the_measured_share_is_scored(self):
-        # Six of ten entry signals were copyable, so six of ten points.
-        self.assertAlmostEqual(_points(self.target, "Copyable Window Share"), 6.0, places=2)
+    def test_the_phase_two_record_carries_no_window_share_field(self):
+        # The verdict-side figure belongs to Phase 3's feed, not the triage record.
+        self.assertNotIn("copyable_window_share", self.target)
 
 
 class TestRecentFormWillNotAssumeFrictionlessExecution(unittest.TestCase):
@@ -211,6 +219,10 @@ class TestUnmeasurableWalletsScoreNothing(unittest.TestCase):
 class TestTheScaleIsNotInflated(unittest.TestCase):
     def test_no_wallet_carries_a_constant_floor_of_free_points(self):
         # The defect gave every candidate 44 points before it had earned any.
+        # The only nonzero component left for this wallet is Slippage Cost Rate,
+        # which the fixture's present actual/copy PnL genuinely measures (the
+        # ADR 0006 weights raised it from 15 to 17 points), so the honest total
+        # is a small fraction of the scale — never the old constant floor.
         bare = _profile(
             "0xnothing",
             all_pnl_json=None,
@@ -223,7 +235,13 @@ class TestTheScaleIsNotInflated(unittest.TestCase):
             hedged_pct=3.0,
         )
         target = _run([bare])["verified_targets"][0]
-        self.assertLess(target["final_score"], 10.0)
+        # Every parameter that must be measured stays at zero.
+        for label in MEASURED_PARAMETERS.values():
+            self.assertEqual(_points(target, label), 0.0)
+        # The only earned points are Slippage Cost Rate, measured from the
+        # fixture's actual/copy PnL: 2.5% of 17 points, linearly between the
+        # 1% full-marks and 5% gate. The engine rounds to two decimals.
+        self.assertAlmostEqual(target["final_score"], 10.63, places=1)
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@
                         </div>
                         <div class="stat-pill">
                             <div class="val" id="statSTier">0</div>
-                            <div class="lbl">S-Tier (≥72)</div>
+                            <div class="lbl">S-Tier (≥80)</div>
                         </div>
                         <div class="stat-pill stat-pill-gem">
                             <div class="val" id="statGems">0</div>
@@ -101,7 +101,7 @@
                         <option value="retention-desc">Sort by: Highest Edge Retention</option>
                         <option value="score-desc">Sort by: Highest Screener Score</option>
                         <option value="score-asc">Sort by: Lowest Screener Score</option>
-                        <option value="pnl-desc">Sort by: Highest Copy PnL</option>
+                        <option value="pnl-desc">Sort by: Highest Simulated Copy PnL</option>
                         <option value="wr-desc">Sort by: Highest Win Rate</option>
                         <option value="polycop-desc">Sort by: Highest PolyCop Site Score</option>
                         <option value="activity-desc">Sort by: Most Recent Activity</option>
@@ -113,7 +113,7 @@
                             <span class="gem-info-bubble">ℹ️</span>
                             <span class="gem-info-card">
                                 <strong>💎 How Hidden Gems Are Identified:</strong><br>
-                                Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with an <strong>A-Tier Screener Score (&ge;65)</strong>!
+                                Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with an <strong>A-Tier Screener Score (&ge;71)</strong>!
                             </span>
                         </span>
                     </button>
@@ -370,9 +370,9 @@
             <div class="modal-scores-row">
                 <div class="score-card-box">
                     <div class="num" id="cardCopyPnl">$0.00</div>
-                    <div class="lbl">Backtest Copy PnL</div>
+                    <div class="lbl">Modelled Copy PnL</div>
                     <div class="tooltip-text">
-                        <strong>Backtest Copy PnL:</strong> Expected PnL if copied with $100 bankroll. Hard gate rejects any trader &lt; $0 (Toxic Copy Poison).
+                        <strong>Modelled Copy PnL:</strong> Expected PnL if copied with $100 bankroll. Hard gate rejects any trader &lt; $0 (Toxic Copy Poison).
                     </div>
                 </div>
                 <div class="score-card-box">
@@ -432,6 +432,12 @@
                         <div class="modal-card-title">💸 Balance Miss</div>
                         <div class="balance-miss-container" id="modalBalanceMiss">
                             <!-- Populated by app.js from the Simulated Copy Run -->
+                        </div>
+                    </div>
+                    <div class="modal-card">
+                        <div class="modal-card-title">🚫 Skip Reasons</div>
+                        <div class="balance-miss-container" id="modalSkipReasons">
+                            <!-- Populated by app.js from the Simulated Copy Run's decision log -->
                         </div>
                     </div>
                 </div>

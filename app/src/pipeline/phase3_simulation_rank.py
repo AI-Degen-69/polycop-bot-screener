@@ -13,7 +13,11 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from execution.copy_execution_profile import CURRENT_PROFILE
-from screener.simulated_copy_run import calculate_copyable_window_share
+from screener.simulated_copy_run import (
+    calculate_copyable_window_share,
+    extract_skip_reasons,
+    parse_simulated_run_response,
+)
 from screener.score_wallets import SIM_TIER_A_MIN, SIM_TIER_B_MIN, SIM_TIER_C_MIN, SIM_TIER_S_MIN
 from screener.slippage_sweep import run_slippage_sensitivity_sweep
 
@@ -100,13 +104,20 @@ def run_phase3_simulation_rank(
     targets: Optional[List[Dict[str, Any]]] = None,
     profile=None,
     fetcher=None,
-    cache_dir: Optional[str] = None
+    cache_dir: Optional[str] = None,
+    endpoint_failure_threshold: int = 3
 ) -> Dict[str, Any]:
     """
     Phase 3: Simulation Rank Phase.
     Takes Phase 2 triage targets, puts them through Slippage Sensitivity Sweep,
     ranks survivors by Edge Retention, assigns Tiers from simulated performance,
     and publishes precomputed targets feed.
+
+    Issue #25: a single wallet the endpoint did not answer for is rejected with
+    an endpoint-failure reason (ADR 0007) while the scan continues. Only a
+    sustained run of `endpoint_failure_threshold` consecutive endpoint-failure
+    wallets is treated as an outage: the scan stops, the verdicts already
+    computed are kept, and the unreached wallets fall back to triage ordering.
     """
     if profile is None:
         profile = CURRENT_PROFILE
@@ -129,8 +140,13 @@ def run_phase3_simulation_rank(
     simulated_results = []
     reduced_confidence = False
     fallback_reason = None
+    # Consecutive wallets the endpoint did not answer for (issue #25). A
+    # measured rejection is not an outage signal: the endpoint answered, the
+    # wallet simply failed the gate.
+    consecutive_failures = 0
+    unreached = []
 
-    for target in targets:
+    for index, target in enumerate(targets):
         addr = target.get("address")
         if not addr:
             continue
@@ -142,19 +158,43 @@ def run_phase3_simulation_rank(
                 fetcher=fetcher,
                 cache_dir=cache_dir
             )
-            # Check if all runs failed due to endpoint unavailability
-            failed_runs = [r for r in sweep_out.get("sweep_results", {}).values() if not r.get("success")]
-            if failed_runs:
-                reduced_confidence = True
-                fallback_reason = failed_runs[0].get("error", "Endpoint unavailable")
-                break
         except Exception as e:
-            reduced_confidence = True
-            fallback_reason = f"Endpoint unavailable: {str(e)}"
-            break
+            # The sweep itself raised — the endpoint did not answer for this
+            # wallet, so it counts against the failure streak.
+            sweep_out = None
+            endpoint_failure = True
+            failure_error = f"Endpoint unavailable: {str(e)}"
+        else:
+            # ADR 0007: a rejection caused by an unmeasured gated level is an
+            # endpoint signal; a measured rejection is not.
+            endpoint_failure = bool(sweep_out.get("endpoint_failure"))
+            if endpoint_failure:
+                failed = [r for r in sweep_out.get("sweep_results", {}).values() if not r.get("success")]
+                failure_error = failed[0].get("error", "Endpoint unavailable") if failed else "Endpoint unavailable"
+            else:
+                failure_error = None
 
+        if endpoint_failure:
+            consecutive_failures += 1
+            fallback_reason = failure_error
+            # A sustained run of wallets the endpoint did not answer for is an
+            # outage, not a flake: stop hammering the dead endpoint and let the
+            # wallets we never reached fall back to triage ordering. The
+            # verdicts already computed are kept — one transient failure no
+            # longer throws a whole scan's simulation work away (issue #25).
+            if consecutive_failures >= endpoint_failure_threshold:
+                reduced_confidence = True
+                unreached = targets[index:]
+                break
+        else:
+            consecutive_failures = 0
+            # The endpoint answered for this wallet, so whatever failure came
+            # before was a flake, not an outage — carrying its error into the
+            # summary would publish a fallback reason on a scan that did not
+            # degrade.
+            fallback_reason = None
 
-        if sweep_out.get("is_rejected"):
+        if sweep_out is None or sweep_out.get("is_rejected"):
             continue
 
         retention = sweep_out.get("edge_retention")
@@ -164,6 +204,20 @@ def run_phase3_simulation_rank(
         # Extract per-market detail & balance miss from 10% slippage run
         res_10 = sweep_out.get("sweep_results", {}).get(10.0, {}).get("data", {})
         window_share = calculate_copyable_window_share(res_10) if res_10 else None
+
+        # Verdict-side figures from the same 10% run (issue #26): the spec
+        # wants Daily Green Rate and Drawdown Depth to describe the follower's
+        # simulation, not the target's leaderboard lifetime, and the decision
+        # log retained so a reader can see why a trade was skipped.
+        sim_parsed = parse_simulated_run_response(res_10) if res_10 else None
+        trading_days = sim_parsed["trading_days"] if sim_parsed else 0
+        if sim_parsed is not None and trading_days > 0:
+            # A rate drawn from zero days is not a rate of zero; it is nothing
+            # measured (the triage side refuses the same way via MIN_OBSERVED_DAYS).
+            daily_green = round((sim_parsed["winning_days"] / float(trading_days)) * 100.0, 2)
+        else:
+            daily_green = None
+        sim_drawdown = sim_parsed["max_drawdown"] if sim_parsed else None
 
         entry = _carry_through_triage(target)
         entry.update({
@@ -176,34 +230,55 @@ def run_phase3_simulation_rank(
             "edge_retention": round(retention, 4) if retention is not None else None,
             "simulated_copy_pnl_10": round(pnl_10, 2),
             "copyable_window_share": round(window_share, 4) if window_share is not None else None,
+            "simulated_daily_green_rate": daily_green,
+            "simulated_trading_days": trading_days,
+            "simulated_max_drawdown": round(sim_drawdown, 2) if sim_drawdown is not None else None,
+            "skip_reasons": extract_skip_reasons(res_10) if res_10 else [],
             "balance_miss_details": extract_balance_miss(res_10),
             "pnl_by_slippage_level": sweep_out.get("pnl_by_level"),
         })
         simulated_results.append(entry)
 
-    # Error Fallback: if endpoint failed, fall back to triage copyability score ordering
+    # A degraded scan keeps the verdicts already computed and falls back only
+    # the wallets the outage stopped us from reaching, each labelled so the
+    # page can tell a simulated tier from a triage grade.
     if reduced_confidence:
-        simulated_results = []
-        for target in targets:
+        simulated_results.sort(
+            key=lambda x: (x.get("edge_retention") or 0.0, x.get("triage_copyability_score") or 0.0),
+            reverse=True
+        )
+        fallbacks = []
+        for target in unreached:
+            if not target.get("address"):
+                continue
             entry = _carry_through_triage(target)
             entry.update({
-                # No simulation ran, so there is no simulated tier. The triage
-                # grade is still here under its own name; presenting it as a
-                # simulated verdict would be the same letter meaning something
-                # weaker, which is exactly the confusion this feed must not ship.
+                # No simulation ran for this wallet, so there is no simulated
+                # tier. The triage grade is still here under its own name;
+                # presenting it as a simulated verdict would be the same letter
+                # meaning something weaker, which is exactly the confusion this
+                # feed must not ship.
                 "verdict_source": "triage",
                 "tier": None,
                 "edge_retention": None,
                 "simulated_copy_pnl_10": None,
                 "copyable_window_share": None,
+                "simulated_daily_green_rate": None,
+                "simulated_trading_days": 0,
+                "simulated_max_drawdown": None,
+                "skip_reasons": [],
                 "balance_miss_details": [],
                 "pnl_by_slippage_level": None,
             })
-            simulated_results.append(entry)
-        simulated_results.sort(key=lambda x: x.get("triage_copyability_score", 0.0), reverse=True)
+            fallbacks.append(entry)
+        fallbacks.sort(key=lambda x: x.get("triage_copyability_score", 0.0), reverse=True)
+        simulated_results.extend(fallbacks)
     else:
         # Rank survivors by Edge Retention descending
-        simulated_results.sort(key=lambda x: (x.get("edge_retention") or 0.0, x.get("triage_copyability_score") or 0.0), reverse=True)
+        simulated_results.sort(
+            key=lambda x: (x.get("edge_retention") or 0.0, x.get("triage_copyability_score") or 0.0),
+            reverse=True
+        )
 
     # The rank a wallet holds within this scan, read off the final ordering
     # (1-based). It travels beside the tier so a reader sees both where a wallet

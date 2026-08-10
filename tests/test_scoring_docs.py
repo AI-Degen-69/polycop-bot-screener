@@ -24,7 +24,13 @@ class TestRenderedBlockComesFromTheCode(unittest.TestCase):
         block = scoring_docs.render_block()
         self.assertIn("$200", block)          # whale gate
         self.assertIn("5.0% modelled", block)  # slippage gate
-        self.assertIn("&ge; 72", block)        # recalibrated S-Tier floor
+        self.assertIn("&ge; 80", block)        # re-measured S-Tier floor (ADR 0010)
+
+    def test_the_block_uses_the_modelled_copy_pnl_term(self):
+        # The gate condition renders CONTEXT.md's approved term, not the
+        # avoided "backtest copy PnL" / "copy PnL" (issue #27).
+        block = scoring_docs.render_block()
+        self.assertIn("Modelled Copy PnL", block)
 
     def test_the_block_contains_the_simulated_verdict_bands(self):
         # The verdict bands (ADR 0002) are rendered from the same constants

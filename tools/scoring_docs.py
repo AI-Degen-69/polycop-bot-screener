@@ -35,9 +35,9 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from screener.score_wallets import (  # noqa: E402
-    BACKTEST_COPY_PNL_MIN_USD,
     GEM_SITE_SCORE_MAX,
     MARKETS_GATE,
+    MODELLED_COPY_PNL_MIN_USD,
     PL_RATIO_GATE,
     SCORING_SPEC,
 )
@@ -112,7 +112,7 @@ GATE_AND_PROFILE_LABELS = [
     {
         "relpath": os.path.join("app", "web", "index.html"),
         "description": "Toxic Copy Poison gate tooltip value",
-        "expected": f"&lt; ${BACKTEST_COPY_PNL_MIN_USD:.0f} (Toxic Copy Poison)",
+        "expected": f"&lt; ${MODELLED_COPY_PNL_MIN_USD:.0f} (Toxic Copy Poison)",
         "pattern": r"&lt; \$\d+ \(Toxic Copy Poison\)",
     },
     {
