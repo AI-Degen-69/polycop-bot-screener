@@ -23,21 +23,28 @@ class TestScoreWalletsEngine(unittest.TestCase):
 
     
     def test_pass_target_high_score(self):
-        """Test a clean S-Tier target passing all gates."""
+        """Test a clean S-Tier target passing all gates.
+
+        Every parameter is measured. A wallet missing measurements cannot reach
+        this score, which is the point of the fail-closed rule.
+        """
         metrics = {
             "actual_pnl": 5000.0,
             "copy_pnl": 4900.0,
-            "slippage": 2.0,
             "hedged_pct": 0.0,
             "pl_ratio": 5.0,
             "days_win_rate": 80.0,
+            "observed_days": 14,
             "r20_win_rate": 80.0,
             "r20_pnl": 800.0,
             "r20_slip": 2.0,
             "pnl_vol_ratio": 25.0,
-            "avg_invest": 25.0,
+            "avg_invest": 100.0,
             "markets": 150,
-            "polycop_site_score": 85.0
+            "polycop_site_score": 85.0,
+            "edge_to_friction": 2.5,
+            "copyable_window_share": 0.9,
+            "drawdown_depth": 0.05,
         }
         res = calculate_bankroll_optimized_score(metrics, user_capital=100.0)
         self.assertEqual(len(res["rejection_reasons"]), 0)
@@ -66,6 +73,176 @@ class TestScoreWalletsEngine(unittest.TestCase):
         metrics = {"polycop_site_score": 75.0, "actual_pnl": 5000.0, "copy_pnl": 4500.0, "r20_pnl": -200.0}
         res = calculate_bankroll_optimized_score(metrics)
         self.assertTrue(any("Divergence Gate" in r for r in res["rejection_reasons"]))
+
+
+def _clean_metrics(**overrides):
+    """A wallet that clears every gate, so parameter scoring can be read in isolation."""
+    base = {
+        "actual_pnl": 5000.0,
+        "copy_pnl": 4900.0,
+        "hedged_pct": 0.0,
+        "pl_ratio": 5.0,
+        "r20_pnl": 800.0,
+        "r20_slip": 2.0,
+        "pnl_vol_ratio": 25.0,
+        "avg_invest": 100.0,
+        "markets": 150,
+        "polycop_site_score": 85.0,
+    }
+    base.update(overrides)
+    return base
+
+
+def _points(res, needle):
+    matched = [v for k, v in res["breakdown"].items() if needle in k]
+    assert len(matched) == 1, f"expected one breakdown row matching {needle!r}, got {matched}"
+    return matched[0]
+
+
+class TestUnmeasuredParametersFailClosed(unittest.TestCase):
+    """A parameter nobody measured must score nothing, not everything.
+
+    These three defaulted to their best possible value, so every wallet
+    collected 44 points it had not earned and the tier bands measured an
+    offset rather than performance.
+    """
+
+    def test_edge_to_friction_scores_nothing_when_absent(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics())
+        self.assertEqual(_points(res, "Edge-to-Friction"), 0.0)
+
+    def test_copyable_window_share_scores_nothing_when_absent(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics())
+        self.assertEqual(_points(res, "Copyable Window Share"), 0.0)
+
+    def test_drawdown_depth_scores_nothing_when_absent(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics())
+        self.assertEqual(_points(res, "Drawdown Depth"), 0.0)
+
+    def test_daily_green_rate_scores_nothing_when_absent(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics())
+        self.assertEqual(_points(res, "Daily Green Rate"), 0.0)
+
+    def test_a_wallet_with_nothing_measured_cannot_reach_a_passing_score(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics())
+        self.assertLess(res["final_score"], 50.0)
+
+
+class TestEdgeToFrictionCurve(unittest.TestCase):
+    def test_break_even_scores_nothing(self):
+        """A ratio of one means friction eats the edge exactly. That is not worth points."""
+        res = calculate_bankroll_optimized_score(_clean_metrics(edge_to_friction=1.0))
+        self.assertAlmostEqual(_points(res, "Edge-to-Friction"), 0.0, places=2)
+
+    def test_an_edge_below_friction_scores_nothing(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(edge_to_friction=0.4))
+        self.assertAlmostEqual(_points(res, "Edge-to-Friction"), 0.0, places=2)
+
+    def test_full_marks_need_an_edge_several_times_the_friction(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(edge_to_friction=3.0))
+        self.assertAlmostEqual(_points(res, "Edge-to-Friction"), 22.0, places=2)
+
+    def test_the_curve_rises_between_break_even_and_full_marks(self):
+        thin = calculate_bankroll_optimized_score(_clean_metrics(edge_to_friction=1.5))
+        thick = calculate_bankroll_optimized_score(_clean_metrics(edge_to_friction=2.5))
+        self.assertLess(_points(thin, "Edge-to-Friction"), _points(thick, "Edge-to-Friction"))
+
+
+class TestDrawdownDepthScoring(unittest.TestCase):
+    def test_an_untouched_equity_curve_scores_full_marks(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(drawdown_depth=0.0))
+        self.assertAlmostEqual(_points(res, "Drawdown Depth"), 12.0, places=2)
+
+    def test_a_deep_fall_scores_nothing(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(drawdown_depth=0.90))
+        self.assertAlmostEqual(_points(res, "Drawdown Depth"), 0.0, places=2)
+
+    def test_a_deeper_fall_scores_less(self):
+        shallow = calculate_bankroll_optimized_score(_clean_metrics(drawdown_depth=0.10))
+        deep = calculate_bankroll_optimized_score(_clean_metrics(drawdown_depth=0.35))
+        self.assertLess(_points(deep, "Drawdown Depth"), _points(shallow, "Drawdown Depth"))
+
+
+class TestDailyGreenRateNeedsEnoughDays(unittest.TestCase):
+    def test_a_strong_rate_over_too_few_days_scores_nothing(self):
+        res = calculate_bankroll_optimized_score(
+            _clean_metrics(days_win_rate=100.0, observed_days=4)
+        )
+        self.assertEqual(_points(res, "Daily Green Rate"), 0.0)
+
+    def test_a_strong_rate_over_enough_days_scores(self):
+        res = calculate_bankroll_optimized_score(
+            _clean_metrics(days_win_rate=90.0, observed_days=14)
+        )
+        self.assertGreater(_points(res, "Daily Green Rate"), 0.0)
+
+
+class TestRecentFormWeighsSlip(unittest.TestCase):
+    def test_the_same_profit_earned_through_more_friction_scores_less(self):
+        clean = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=1000.0, r20_slip=0.0))
+        gritty = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=1000.0, r20_slip=12.0))
+        self.assertLess(_points(gritty, "Recent Form"), _points(clean, "Recent Form"))
+
+    def test_profit_earned_through_total_friction_scores_nothing(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=1000.0, r20_slip=15.0))
+        self.assertAlmostEqual(_points(res, "Recent Form"), 0.0, places=2)
+
+    def test_a_losing_recent_run_scores_nothing(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=0.0, r20_slip=0.0))
+        self.assertAlmostEqual(_points(res, "Recent Form"), 0.0, places=2)
+
+
+class TestSizingFitFollowsTheCopyableWindow(unittest.TestCase):
+    """The peak belongs where the realised copy ratio equals the nominal one."""
+
+    def test_the_peak_sits_inside_the_window(self):
+        from execution.copy_execution_profile import CURRENT_PROFILE
+
+        peak = CURRENT_PROFILE.sizing_fit_peak_usd
+        self.assertGreater(peak, CURRENT_PROFILE.window_min_usd)
+        self.assertLess(peak, CURRENT_PROFILE.window_max_usd)
+
+    def test_a_target_sized_at_the_peak_scores_full_marks(self):
+        from execution.copy_execution_profile import CURRENT_PROFILE
+
+        res = calculate_bankroll_optimized_score(
+            _clean_metrics(avg_invest=CURRENT_PROFILE.sizing_fit_peak_usd)
+        )
+        self.assertAlmostEqual(_points(res, "Sizing Fit"), 5.0, places=2)
+
+    def test_a_target_below_the_window_scores_nothing(self):
+        """Below the window every copy order is bumped to the venue minimum."""
+        res = calculate_bankroll_optimized_score(_clean_metrics(avg_invest=10.0))
+        self.assertAlmostEqual(_points(res, "Sizing Fit"), 0.0, places=2)
+
+    def test_a_target_above_the_window_scores_nothing(self):
+        """Above the window the position cap clips the copy below the nominal ratio."""
+        res = calculate_bankroll_optimized_score(_clean_metrics(avg_invest=190.0))
+        self.assertAlmostEqual(_points(res, "Sizing Fit"), 0.0, places=2)
+
+
+class TestScaleIsIntact(unittest.TestCase):
+    def test_a_fully_measured_ideal_wallet_scores_one_hundred(self):
+        from execution.copy_execution_profile import CURRENT_PROFILE
+
+        res = calculate_bankroll_optimized_score(
+            _clean_metrics(
+                copy_pnl=5000.0,
+                edge_to_friction=3.0,
+                copyable_window_share=1.0,
+                drawdown_depth=0.0,
+                days_win_rate=95.0,
+                observed_days=14,
+                r20_pnl=2000.0,
+                r20_slip=0.0,
+                pl_ratio=4.0,
+                pnl_vol_ratio=30.0,
+                markets=250,
+                avg_invest=CURRENT_PROFILE.sizing_fit_peak_usd,
+            )
+        )
+        self.assertEqual(len(res["rejection_reasons"]), 0)
+        self.assertAlmostEqual(res["final_score"], 100.0, places=1)
 
 
 if __name__ == "__main__":

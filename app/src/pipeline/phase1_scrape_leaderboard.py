@@ -9,15 +9,23 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 DATA_DIR = os.path.join(APP_DIR, "data")
 
-def fetch_and_scrape_leaderboard(min_score=60.0):
+def fetch_and_scrape_leaderboard(min_score=None):
     """
     Phase 1: Paginate through all pages of PolyCop leaderboard API and scrape raw profiles.
-    Filters for raw profiles with PolyCop Site Score > 60.0. Saves to app/data/phase1_scraped_wallets.json.
+
+    No site-score pre-filter by default. The screen exists because the site's own
+    score optimises for something other than copyability, and a Hidden Gem is by
+    definition a wallet the two disagree about — discarding low-scoring wallets
+    here would make those unfindable. The engine keeps its own sanity floor.
+
+    `min_score` remains available for a deliberately narrowed scrape; leaving it
+    unset keeps every profile.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     out_file = os.path.join(DATA_DIR, "phase1_scraped_wallets.json")
     
-    print(f"=== PHASE 1: SCRAPING POLYCOP LEADERBOARD (PolyCop Score > {min_score}) ===")
+    scope = "every profile" if min_score is None else f"PolyCop Score > {min_score}"
+    print(f"=== PHASE 1: SCRAPING POLYCOP LEADERBOARD ({scope}) ===")
     
     page = 1
     page_size = 100
@@ -41,14 +49,14 @@ def fetch_and_scrape_leaderboard(min_score=60.0):
                     print(f"No profiles found on page {page}. Ending pagination.")
                     break
                 
-                # Filter for profiles where PolyCop site score > min_score
                 for p in profiles:
                     polycop_score = float(p.get("score", p.get("polycop_score", 0.0)))
-                    if polycop_score > min_score:
-                        p["polycop_site_score"] = polycop_score
-                        all_profiles.append(p)
+                    if min_score is not None and polycop_score <= min_score:
+                        continue
+                    p["polycop_site_score"] = polycop_score
+                    all_profiles.append(p)
 
-                print(f"Page {page}: Fetched {len(profiles)} profiles. Total profiles with score > {min_score}: {len(all_profiles)}")
+                print(f"Page {page}: Fetched {len(profiles)} profiles. Total kept ({scope}): {len(all_profiles)}")
                 
                 meta = data.get("meta", {})
                 total_pages = meta.get("total_pages")
@@ -74,9 +82,9 @@ def fetch_and_scrape_leaderboard(min_score=60.0):
         json.dump(payload, f, indent=2)
 
     print(f"\n=== PHASE 1 COMPLETE ===")
-    print(f"Total Scraped Profiles (Score > {min_score}): {len(all_profiles)}")
+    print(f"Total Scraped Profiles ({scope}): {len(all_profiles)}")
     print(f"Saved raw scraped dataset to: {out_file}")
     return out_file
 
 if __name__ == "__main__":
-    fetch_and_scrape_leaderboard(60.0)
+    fetch_and_scrape_leaderboard()

@@ -33,7 +33,8 @@ _Avoid_: filter, threshold, cutoff
 
 **Copyability Score**:
 A weighted sum out of 100 used to triage candidates cheaply. It orders wallets for further work; it
-is not the verdict.
+is not the verdict. A parameter whose input could not be measured contributes nothing to the sum,
+so an unmeasured wallet scores low rather than scoring well by default.
 _Avoid_: rating, grade, rank
 
 **Tier**:
@@ -117,8 +118,9 @@ a fraction so it transfers across account sizes.
 _Avoid_: max drawdown, DD
 
 **Recent Form**:
-Metrics restricted to a target's recent activity. Used because a dead edge and an edge that never
-existed look identical in lifetime numbers.
+A target's recent profit judged together with the friction it was earned under, rather than either
+alone. Restricted to recent activity because a dead edge and an edge that never existed look
+identical in lifetime numbers.
 
 **Activity Recency**:
 How recently a target last traded, measured against data collection time rather than read time.

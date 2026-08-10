@@ -17,17 +17,41 @@ from execution.copy_execution_profile import CURRENT_PROFILE
 from screener.score_wallets import calculate_bankroll_optimized_score, calculate_edge_retention
 from screener.activity import compute_activity, parse_timestamp, summarize_buckets
 from pipeline.run_mock_client import parse_run_mock_response, calculate_copyable_window_share
+from screener.derived_metrics import (
+    calculate_daily_green_rate,
+    calculate_drawdown_depth,
+    calculate_edge_to_friction,
+)
 
-def run_phase2_filter(profile=CURRENT_PROFILE):
+def _optional_float(value):
+    """A leaderboard figure that was present, or None if it was not.
+
+    Coercing an absent figure to zero is not neutral: for a cost, zero is the
+    best possible reading, and the engine would score the wallet as though it
+    traded without friction.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
     """
     Phase 2: Takes raw scraped profiles from app/data/phase1_scraped_wallets.json,
     runs the 100-Point Audit Engine (score_wallets.py), and outputs app/data/phase2_verified_targets.json.
 
     Triage is only valid for one Copy Execution Profile, so the profile is stated once
     here and passed down rather than restated as literals per call site.
+
+    The two paths default to the cached dataset and are overridable so the whole
+    phase can be exercised against a fixture, which is the only way to catch a
+    parameter that scores well because nothing ever measured it.
     """
-    in_file = os.path.join(DATA_DIR, "phase1_scraped_wallets.json")
-    out_file = os.path.join(DATA_DIR, "phase2_verified_targets.json")
+    in_file = in_file or os.path.join(DATA_DIR, "phase1_scraped_wallets.json")
+    out_file = out_file or os.path.join(DATA_DIR, "phase2_verified_targets.json")
 
     if not os.path.exists(in_file):
         print(f"Error: Phase 1 file {in_file} not found. Run phase1_scrape_leaderboard.py first.")
@@ -57,21 +81,45 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
         if not addr:
             continue
 
+        # Measured before scoring, not after. Each of these is None when the
+        # source data will not support it, and the engine scores None as nothing,
+        # so an unmeasured wallet ranks below a measured poor one.
+        mock_payload = p.get("run_mock_response") or p.get("mock_data")
+        sim_summary = parse_run_mock_response(mock_payload) if mock_payload else None
+        window_share = calculate_copyable_window_share(mock_payload) if mock_payload else None
+        green_rate, observed_days = calculate_daily_green_rate(p.get("daily_stats_json"))
+        drawdown_depth = calculate_drawdown_depth(p.get("all_pnl_json"))
+        # Each fallback is tried only when the one before it is genuinely absent,
+        # so a present-but-null field does not abort the run or masquerade as a
+        # measured zero.
+        pnl_vol_ratio = None
+        for key in ("roi", "pnl_to_volume_ratio", "pnl_vol_ratio"):
+            pnl_vol_ratio = _optional_float(p.get(key))
+            if pnl_vol_ratio is not None:
+                break
+        edge_to_friction = calculate_edge_to_friction(pnl_vol_ratio, profile.slippage_pct)
+
         raw_metrics = {
             "actual_pnl": float(p.get("actual_pnl", p.get("pnl", 0.0))),
             "copy_pnl": float(p.get("copy_backtest_pnl", p.get("copy_pnl", -1.0))),
             "slippage": float(p.get("slippage", 0.0)),
             "hedged_pct": float(p.get("hedged_pct", p.get("hedged_percentage", 0.0))),
             "pl_ratio": float(p.get("avg_profit_loss_ratio", p.get("pl_ratio", 0.0))),
-            "days_win_rate": float(p.get("daily_green_rate", p.get("win_rate", p.get("days_win_rate", 0.0)))),
+            "days_win_rate": green_rate,
+            "observed_days": observed_days,
             "r20_win_rate": float(p.get("r20_wr", p.get("recent_20_win_rate", p.get("r20_win_rate", 0.0)))),
             "r20_pnl": float(p.get("r20_pnl", p.get("recent_20_pnl", 0.0))),
-            "r20_slip": float(p.get("r20_slip", p.get("recent_20_slippage", 0.0))),
-            "pnl_vol_ratio": float(p.get("roi", p.get("pnl_to_volume_ratio", p.get("pnl_vol_ratio", 0.0)))),
+            "r20_slip": _optional_float(p.get("r20_slip", p.get("recent_20_slippage"))),
+            # Capital Efficiency reads this directly and an unknown ratio earns
+            # nothing there, which zero already expresses.
+            "pnl_vol_ratio": pnl_vol_ratio if pnl_vol_ratio is not None else 0.0,
             "avg_invest": float(p.get("avg_invest", 0.0)),
             "markets": int(p.get("markets_traded", p.get("markets", 0))),
             "polycop_site_score": float(p.get("polycop_site_score", p.get("score", 0.0))),
-            "buy_price": float(p.get("buy_price", p.get("avg_buy_price", 0.0)))
+            "buy_price": float(p.get("buy_price", p.get("avg_buy_price", 0.0))),
+            "drawdown_depth": drawdown_depth,
+            "copyable_window_share": window_share,
+            "edge_to_friction": edge_to_friction,
         }
 
         audit_res = calculate_bankroll_optimized_score(raw_metrics, profile=profile)
@@ -84,10 +132,6 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
         is_gem = raw_metrics["polycop_site_score"] < 75 and score >= 80.0
         raw_name = p.get("name") or p.get("username")
         name_str = str(raw_name) if raw_name else f"PolyCop_Trader ({addr[:6]}...{addr[-4:]})"
-
-        mock_payload = p.get("run_mock_response") or p.get("mock_data")
-        sim_summary = parse_run_mock_response(mock_payload) if mock_payload else None
-        window_share = calculate_copyable_window_share(mock_payload) if mock_payload else None
 
         target_entry = {
             "address": addr,
@@ -102,7 +146,10 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
                 "polycop_site_score": raw_metrics["polycop_site_score"],
                 "actual_pnl": round(raw_metrics["actual_pnl"], 2),
                 "copy_pnl": round(raw_metrics["copy_pnl"], 2),
-                "days_win_rate": round(raw_metrics["days_win_rate"], 2),
+                "days_win_rate": round(green_rate, 2) if green_rate is not None else None,
+                "observed_days": observed_days,
+                "drawdown_depth": round(drawdown_depth, 4) if drawdown_depth is not None else None,
+                "edge_to_friction": round(edge_to_friction, 4) if edge_to_friction is not None else None,
                 "hedged_pct": round(raw_metrics["hedged_pct"], 2),
                 "r20_win_rate": round(raw_metrics["r20_win_rate"], 2),
                 "pl_ratio": round(raw_metrics["pl_ratio"], 2),
@@ -110,7 +157,7 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
                 "avg_invest": round(raw_metrics["avg_invest"], 2),
                 "markets": raw_metrics["markets"],
                 "r20_pnl": round(raw_metrics["r20_pnl"], 2),
-                "r20_slip": round(raw_metrics["r20_slip"], 2),
+                "r20_slip": round(raw_metrics["r20_slip"], 2) if raw_metrics["r20_slip"] is not None else None,
                 "buy_price": round(raw_metrics["buy_price"], 4)
             },
             "activity": compute_activity(p, now=scrape_now),

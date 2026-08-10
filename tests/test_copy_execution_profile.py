@@ -130,9 +130,24 @@ class TestProfileDerivedSizing(unittest.TestCase):
         with self.assertRaises(ValueError):
             CopyExecutionProfile(copy_ratio=0.0)
 
-    def test_a_profile_with_no_sizing_peak_is_refused_at_construction(self):
-        with self.assertRaises(ValueError):
-            CopyExecutionProfile(sizing_fit_peak_usd=0.0)
+    def test_the_sizing_peak_is_the_midpoint_of_the_copyable_window(self):
+        # Derived rather than stated, so it cannot be set to a figure the bot's
+        # own caps contradict.
+        self.assertAlmostEqual(CURRENT_PROFILE.sizing_fit_peak_usd, 100.0, places=2)
+
+    def test_the_sizing_peak_follows_a_change_to_the_caps(self):
+        # A hand-picked constant would have stayed put and quietly become wrong.
+        lifted = CopyExecutionProfile(per_token_cap_usd=10.0, max_position_bankroll_fraction=0.10)
+        self.assertGreater(lifted.sizing_fit_peak_usd, CURRENT_PROFILE.sizing_fit_peak_usd)
+        self.assertAlmostEqual(
+            lifted.sizing_fit_peak_usd,
+            (lifted.window_min_usd + lifted.window_max_usd) / 2.0,
+            places=2,
+        )
+
+    def test_the_sizing_peak_cannot_be_set_by_hand(self):
+        with self.assertRaises(TypeError):
+            CopyExecutionProfile(sizing_fit_peak_usd=25.0)
 
     def test_a_profile_cannot_be_mutated_after_construction(self):
         # Results are labelled with a fingerprint; a mutable profile would let the

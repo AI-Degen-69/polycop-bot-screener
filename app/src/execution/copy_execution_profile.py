@@ -38,14 +38,6 @@ class CopyExecutionProfile:
     # Polymarket will not accept an order below this.
     venue_min_order_usd: float = 1.00
 
-    # The target trade size that scores full Sizing Fit points.
-    #
-    # Hand-picked at $25 by the outgoing engine and stated here unchanged, so that
-    # extracting the profile alters no pipeline output. The reweighted engine moves
-    # it onto the Copyable Trade Window, where the realised copy ratio actually
-    # equals the nominal one.
-    sizing_fit_peak_usd: float = 25.0
-
     def __post_init__(self):
         """Reject a profile whose derived quantities would be undefined.
 
@@ -54,10 +46,6 @@ class CopyExecutionProfile:
         """
         if self.copy_ratio <= 0:
             raise ValueError(f"copy_ratio must be positive, got {self.copy_ratio}")
-        if self.sizing_fit_peak_usd <= 0:
-            raise ValueError(
-                f"sizing_fit_peak_usd must be positive, got {self.sizing_fit_peak_usd}"
-            )
 
     @property
     def max_single_position_usd(self) -> float:
@@ -99,6 +87,18 @@ class CopyExecutionProfile:
         nothing.
         """
         return self.max_single_position_usd / self.copy_ratio
+
+    @property
+    def sizing_fit_peak_usd(self) -> float:
+        """The target trade size that scores full Sizing Fit points.
+
+        The midpoint of the Copyable Trade Window, so it is derived from how the
+        bot actually executes rather than picked by hand. It is the point
+        furthest from both distortions at once: the venue minimum bumping small
+        copies up, and the position cap clipping large ones down. Move a cap or
+        the copy ratio and the peak follows, which a stated constant would not.
+        """
+        return (self.window_min_usd + self.window_max_usd) / 2.0
 
     def min_target_order_floor_usd(self, target_avg_invest_usd: float) -> float:
         """The smallest order from this target that the follower can still mirror.

@@ -37,7 +37,7 @@ def main():
         print("\n[PIPELINE] Serve-only mode requested. Skipping wallet scan pipeline.")
     elif force_rescan or not os.path.exists(VERIFIED_DATA_FILE):
         print("\n[PIPELINE] Dataset missing or rescan requested. Running pipeline...")
-        fetch_and_scrape_leaderboard(min_score=60.0)
+        fetch_and_scrape_leaderboard()
         run_phase2_filter()
     else:
         print(f"\n[PIPELINE] Verified dataset found: {VERIFIED_DATA_FILE}")
