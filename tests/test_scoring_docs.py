@@ -93,7 +93,10 @@ class TestWebUiLabelsAreRenderedFromTheCode(unittest.TestCase):
     def _label(self, description):
         """The UI_LABELS entry whose description matches, found by name so the
         tamper tests do not depend on list order."""
-        return next(l for l in scoring_docs.UI_LABELS if l["description"] == description)
+        return next(
+            label for label in scoring_docs.UI_LABELS
+            if label["description"] == description
+        )
 
     def _tamper_ui(self, entry, tampered_text):
         """Write `tampered_text` into a temp copy of the entry's file and check

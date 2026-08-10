@@ -229,11 +229,20 @@ def run_phase3_simulation_rank(
     # clobbered the feed with fixture wallets.
     if publishes_feed:
         out_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+        # Written beside the feed and moved onto it, so a reader never sees a
+        # half-written scan: the web app polls this file while scans run. A
+        # failure here is raised rather than swallowed — a scan that could not
+        # publish has not succeeded, and the silence of the earlier version is
+        # what let a broken publish path go unnoticed through a whole day of
+        # scans that looked like they had worked.
+        tmp_file = out_file + ".tmp"
         try:
-            with open(out_file, "w", encoding="utf-8") as f:
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(summary, f, indent=2)
-        except Exception:
-            pass
+            os.replace(tmp_file, out_file)
+        finally:
+            if os.path.exists(tmp_file):
+                os.remove(tmp_file)
 
     return summary
 
