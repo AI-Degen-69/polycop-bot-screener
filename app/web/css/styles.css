@@ -232,6 +232,7 @@ header {
 .summary-cell { font-size: 0.9rem; }
 .summary-lbl { color: var(--text-muted); display: block; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.15rem; }
 .summary-val { font-weight: 700; font-family: 'Space Mono', monospace; color: var(--text-main); font-size: 1.08rem; }
+.summary-val.rank-number { color: #34d399; }
 
 /* --- MODAL DIALOG STYLES --- */
 .modal-overlay {
@@ -263,6 +264,7 @@ header {
 .header-score-badge { font-size: 0.85rem; font-weight: 700; padding: 0.3rem 0.8rem; border-radius: 8px; }
 .badge-screener { background: rgba(6, 182, 212, 0.15); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); }
 .badge-polycop { background: rgba(139, 92, 246, 0.15); border: 1px solid var(--accent-purple); color: var(--accent-purple); }
+.badge-rank { background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.6); color: #34d399; }
 
 .modal-nav-controls { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
 .nav-btn {

@@ -9,10 +9,54 @@ if SRC_DIR not in sys.path:
 
 from execution.copy_execution_profile import CURRENT_PROFILE
 
+# ---------------------------------------------------------------------------
+# Hard Rejection Gate constants.
+#
+# These are the single machine-readable source of truth for the gate values.
+# The scoring engine reads them, and `tools/scoring_docs.py` renders the
+# documentation tables from them, so a gate can never change in the code
+# without the docs being regenerated (the CI drift check fails until they
+# match). Never write a gate threshold as an inline literal here.
+# ---------------------------------------------------------------------------
+
 # Whale gate: a target whose typical trade dwarfs the bankroll cannot be mirrored at
 # any sane participation rate. A screening gate rather than a bot setting, so it is
 # not part of the Copy Execution Profile.
 WHALE_AVG_INVEST_LIMIT_USD = 200.0
+
+# Sanity floor for manually pasted addresses. The leaderboard site-score pre-filter
+# is gone, so this is what stops arbitrary garbage from being scored.
+SITE_SCORE_SANITY_FLOOR = 40.0
+
+# Toxic Copy Poison: a modelled copy that loses money is not a target.
+BACKTEST_COPY_PNL_MIN_USD = 0.0
+
+# Slippage Cost Rate gate, in modelled terms. 5% modelled is roughly 20% real under
+# the Friction Realism Multiplier of 4.2 (ADR 0001).
+SLIPPAGE_COST_RATE_GATE = 0.05
+
+# How much worse real execution friction is than the leaderboard model assumes.
+# A tracked estimate (ADR 0001), not a constant: it is expected to move as more
+# live fills are logged, and the docs are generated from it so they move too.
+FRICTION_REALISM_MULTIPLIER = 4.2
+
+# Hedged Rate gate: a market-making signature and a doubling of the legs on which
+# friction is paid.
+HEDGED_RATE_GATE_PCT = 3.0
+
+# Profit/Loss Ratio gate: winning pennies, losing dollars.
+PL_RATIO_GATE = 0.3
+
+# Markets Sample gate: fewer markets and the record is a streak, not a track record.
+MARKETS_GATE = 20
+
+# Divergence gate: a dead edge must not be carried by history. Rejects a wallet
+# whose recent form is negative while lifetime performance is strongly positive.
+DIVERGENCE_LIFETIME_PNL_USD = 1000.0
+
+# ---------------------------------------------------------------------------
+# Continuous parameter constants.
+# ---------------------------------------------------------------------------
 
 # Edge-to-Friction of 1.0 is break-even: the edge is exactly consumed by the cost
 # of following it. Points start there rather than peaking there. Full marks need
@@ -28,10 +72,168 @@ DRAWDOWN_DEPTH_ZERO_AT = 0.50
 # Below this many observed days a green rate is a streak, not a record.
 MIN_OBSERVED_DAYS = 10
 
-# Recent Form reads profit against the friction it was earned through. Profit
-# taken entirely through this much slippage is worth nothing to a follower.
+# Recent Form reads profit as a return on the capital that produced it, judged
+# against the friction it was earned through. Profit taken entirely through this
+# much slippage is worth nothing to a follower.
+#
+# The recent-20 window covers the target's most recent 20 trades, so the capital
+# deployed over it is 20 trades at the target's average investment. An
+# absolute-dollar scale would reward the target's size rather than its edge, and
+# size is the thing the Copyable Trade Window already constrains elsewhere — see
+# ADR 0004. Full marks at a 100% return over the window, before the friction
+# discount.
 RECENT_FORM_SLIP_CEILING_PCT = 15.0
-RECENT_FORM_FULL_MARKS_PNL_USD = 1000.0
+RECENT_FORM_WINDOW_TRADES = 20.0
+RECENT_FORM_FULL_MARKS_RETURN = 1.0
+
+# Copyability Score tier bands, calibrated against the distribution of a real
+# scored run over the cached leaderboard data (ADR 0005). Absolute, not
+# percentile: a scan full of weak wallets must not manufacture an S-Tier.
+# These bands grade the triage score only; verdicts come from simulation.
+TIER_S_MIN = 72.0
+TIER_A_MIN = 65.0
+TIER_B_MIN = 60.0
+TIER_C_MIN = 50.0
+
+# A Hidden Gem is a wallet the screen grades highly while the leaderboard's own
+# score rates it poorly. Tied to the recalibrated A-Tier floor (ADR 0005).
+GEM_SITE_SCORE_MAX = 75.0
+
+# ---------------------------------------------------------------------------
+# Machine-readable scoring spec. Rendered into the docs by tools/scoring_docs.py;
+# the CI drift check fails when the docs drift from it.
+# ---------------------------------------------------------------------------
+
+SCORING_SPEC = {
+    "gates": [
+        {
+            "name": "PolyCop Site Score sanity floor",
+            "condition": f"< {SITE_SCORE_SANITY_FLOOR:.0f} / 100",
+            "reason": "stops manually pasted garbage from being scored once the leaderboard pre-filter is gone",
+        },
+        {
+            "name": "Toxic Copy Poison",
+            "condition": f"Copy PnL < ${BACKTEST_COPY_PNL_MIN_USD:.0f}",
+            "reason": "a modelled copy that loses money is not a target",
+        },
+        {
+            "name": "Slippage Cost Rate",
+            "condition": f"> {SLIPPAGE_COST_RATE_GATE * 100:.1f}% modelled",
+            "reason": f"roughly {SLIPPAGE_COST_RATE_GATE * 100 * FRICTION_REALISM_MULTIPLIER:.0f}% real under the Friction Realism Multiplier (ADR 0001)",
+        },
+        {
+            "name": "Hedged Rate",
+            "condition": f"> {HEDGED_RATE_GATE_PCT:.1f}%",
+            "reason": "market-making signature and doubled friction legs",
+        },
+        {
+            "name": "Profit/Loss Ratio",
+            "condition": f"< {PL_RATIO_GATE:.1f}",
+            "reason": "winning pennies, losing dollars",
+        },
+        {
+            "name": "Markets Sample",
+            "condition": f"< {MARKETS_GATE:.0f}",
+            "reason": "a streak, not a track record",
+        },
+        {
+            "name": "Whale Avg Invest",
+            "condition": f"> ${WHALE_AVG_INVEST_LIMIT_USD:.0f}",
+            "reason": "a typical trade that dwarfs the bankroll cannot be mirrored",
+        },
+        {
+            "name": "Divergence",
+            "condition": f"r20_pnl < $0 while actual_pnl > ${DIVERGENCE_LIFETIME_PNL_USD:,.0f}",
+            "reason": "a dead edge must not be carried by history",
+        },
+    ],
+    "parameters": [
+        {
+            "name": "Edge-to-Friction Ratio",
+            "points": 22,
+            "zero": f"<= {EDGE_TO_FRICTION_BREAK_EVEN:.1f} (break-even)",
+            "full": f">= {EDGE_TO_FRICTION_FULL_MARKS:.1f}",
+            "note": "edge per dollar of friction; the cheapest disqualifying arithmetic runs first",
+        },
+        {
+            "name": "Slippage Cost Rate",
+            "points": 15,
+            "zero": f">= {SLIPPAGE_COST_RATE_GATE * 100:.1f}%",
+            "full": "<= 1.0%",
+            "note": "modelled, before the Friction Realism Multiplier",
+        },
+        {
+            "name": "Drawdown Depth",
+            "points": 12,
+            "zero": f">= {DRAWDOWN_DEPTH_ZERO_AT:.2f} of peak",
+            "full": "0.0",
+            "note": "from the lifetime equity curve",
+        },
+        {
+            "name": "Copyable Window Share",
+            "points": 10,
+            "zero": "0%",
+            "full": "100%",
+            "note": "share of trades the Copyable Trade Window admits",
+        },
+        {
+            "name": "Recent Form",
+            "points": 10,
+            "zero": "PnL <= $0 or slip unmeasured",
+            "full": f">= {RECENT_FORM_FULL_MARKS_RETURN * 100:.0f}% return over the recent-{RECENT_FORM_WINDOW_TRADES:.0f} window at 0% slip",
+            "note": "return on deployed capital, judged against the friction it came through (ADR 0004)",
+        },
+        {
+            "name": "Daily Green Rate",
+            "points": 8,
+            "zero": f"< 40% or fewer than {MIN_OBSERVED_DAYS:.0f} observed days",
+            "full": ">= 85%",
+            "note": "copy-adjusted, measured from real per-day simulated results",
+        },
+        {
+            "name": "Profit/Loss Ratio",
+            "points": 8,
+            "zero": f"<= {PL_RATIO_GATE:.1f}",
+            "full": ">= 3.0",
+            "note": "",
+        },
+        {
+            "name": "Sizing Fit",
+            "points": 5,
+            "zero": "outside the Copyable Trade Window",
+            "full": "at the window midpoint",
+            "note": "peak derived from the Copy Execution Profile, never hand-picked",
+        },
+        {
+            "name": "Hedged Control",
+            "points": 5,
+            "zero": f">= {HEDGED_RATE_GATE_PCT:.1f}%",
+            "full": "0%",
+            "note": "",
+        },
+        {
+            "name": "Markets Sample",
+            "points": 3,
+            "zero": f"< {MARKETS_GATE:.0f}",
+            "full": ">= 200",
+            "note": "",
+        },
+        {
+            "name": "Capital Efficiency",
+            "points": 2,
+            "zero": "0",
+            "full": ">= 30 PnL/volume ratio",
+            "note": "",
+        },
+    ],
+    "tiers": [
+        {"label": "S-Tier (God-Tier Target)", "min": TIER_S_MIN},
+        {"label": "A-Tier (Strong Copy Target)", "min": TIER_A_MIN},
+        {"label": "B-Tier (Moderate Copy Target)", "min": TIER_B_MIN},
+        {"label": "C-Tier (High Risk / Volatile)", "min": TIER_C_MIN},
+        {"label": "F-Tier (Toxic / Rejection)", "min": None},
+    ],
+}
 
 
 def _measured(value):
@@ -46,6 +248,23 @@ def _measured(value):
         return float(value)
     except (ValueError, TypeError):
         return None
+
+
+def grade_for_score(final_score: float) -> str:
+    """The triage grade a Copyability Score earns under the recalibrated bands.
+
+    Triage only: verdicts come from simulation. Extracted from the engine so the
+    band mapping is unit-testable and the web app can reuse the exact wording.
+    """
+    if final_score >= TIER_S_MIN:
+        return "S-Tier (God-Tier Target)"
+    if final_score >= TIER_A_MIN:
+        return "A-Tier (Strong Copy Target)"
+    if final_score >= TIER_B_MIN:
+        return "B-Tier (Moderate Copy Target)"
+    if final_score >= TIER_C_MIN:
+        return "C-Tier (High Risk / Volatile)"
+    return "F-Tier (Toxic / Rejection)"
 
 
 def calculate_edge_retention(pnl_10_pct: float, pnl_2_pct: float) -> float | None:
@@ -64,7 +283,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     PolyCop Reweighted 100-Point Triage Engine, run under one Copy Execution Profile.
     Reallocated 11 continuous parameters (Total 100 pts).
 
-    HARD REJECTION GATES:
+    HARD REJECTION GATES (see SCORING_SPEC):
     1. PolyCop Site Score < 40.0 -> Low quality sanity floor.
     2. Backtest Copy PnL < $0 -> Toxic Copy Poison.
     3. Slippage Cost Rate > 5% modelled (0.05) -> Friction limit.
@@ -85,7 +304,6 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     copy_pnl = float(metrics.get("copy_pnl", -1.0))
     hedged = float(metrics.get("hedged_pct", 100.0))
     pl_ratio = float(metrics.get("pl_ratio", 0.0))
-    r20_wr = float(metrics.get("r20_win_rate", 0.0))
     r20_pnl = float(metrics.get("r20_pnl", 0.0))
     # Unmeasured slip is not frictionless slip. A missing value here used to
     # arrive as zero from the pipeline, which is the best possible reading.
@@ -110,21 +328,21 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         slip_cost_rate = 0.0
 
     # --- HARD REJECTION GATES ---
-    if polycop_site_score < 40.0:
-        rejection_reasons.append(f"PolyCop Site Score {polycop_site_score:.0f} < 40/100 sanity floor")
-    if copy_pnl < 0:
+    if polycop_site_score < SITE_SCORE_SANITY_FLOOR:
+        rejection_reasons.append(f"PolyCop Site Score {polycop_site_score:.0f} < {SITE_SCORE_SANITY_FLOOR:.0f}/100 sanity floor")
+    if copy_pnl < BACKTEST_COPY_PNL_MIN_USD:
         rejection_reasons.append("Backtest Copy PnL < $0 (Toxic Copy Poison)")
-    if slip_cost_rate > 0.05:
-        rejection_reasons.append(f"Slippage Cost Rate {slip_cost_rate*100:.1f}% > 5.0% modelled limit")
-    if hedged > 3.0:
-        rejection_reasons.append(f"Hedged Rate {hedged}% > 3.0%")
-    if pl_ratio < 0.3:
-        rejection_reasons.append(f"P/L Ratio {pl_ratio:.2f}x < 0.3x")
-    if mkts < 20:
-        rejection_reasons.append(f"Short Track Record ({int(mkts)} markets < 20 min threshold)")
+    if slip_cost_rate > SLIPPAGE_COST_RATE_GATE:
+        rejection_reasons.append(f"Slippage Cost Rate {slip_cost_rate*100:.1f}% > {SLIPPAGE_COST_RATE_GATE*100:.1f}% modelled limit")
+    if hedged > HEDGED_RATE_GATE_PCT:
+        rejection_reasons.append(f"Hedged Rate {hedged}% > {HEDGED_RATE_GATE_PCT}%")
+    if pl_ratio < PL_RATIO_GATE:
+        rejection_reasons.append(f"P/L Ratio {pl_ratio:.2f}x < {PL_RATIO_GATE:.1f}x")
+    if mkts < MARKETS_GATE:
+        rejection_reasons.append(f"Short Track Record ({int(mkts)} markets < {MARKETS_GATE:.0f} min threshold)")
     if avg_inv > WHALE_AVG_INVEST_LIMIT_USD:
         rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > ${WHALE_AVG_INVEST_LIMIT_USD:.0f})")
-    if r20_pnl < 0 and actual_pnl > 1000.0:
+    if r20_pnl < 0 and actual_pnl > DIVERGENCE_LIFETIME_PNL_USD:
         rejection_reasons.append(f"Divergence Gate: Negative Recent Form (${r20_pnl:.2f}) vs strongly positive lifetime PnL (${actual_pnl:.2f})")
 
     # --- 11 REWEIGHTED CONTINUOUS PARAMETERS (TOTAL 100 PTS) ---
@@ -143,10 +361,10 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     # 2. Slippage Cost Rate (15 pts)
     if slip_cost_rate <= 0.01:
         slip_score = 15.0
-    elif slip_cost_rate >= 0.05:
+    elif slip_cost_rate >= SLIPPAGE_COST_RATE_GATE:
         slip_score = 0.0
     else:
-        slip_score = 15.0 * (1.0 - ((slip_cost_rate - 0.01) / (0.05 - 0.01)))
+        slip_score = 15.0 * (1.0 - ((slip_cost_rate - 0.01) / (SLIPPAGE_COST_RATE_GATE - 0.01)))
     score += slip_score
     breakdown["2. Slippage Cost Rate (15%)"] = round(slip_score, 2)
 
@@ -163,14 +381,15 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     score += cws_score
     breakdown["4. Copyable Window Share (10%)"] = round(cws_score, 2)
 
-    # 5. Recent Form (10 pts) - recent profit judged against the friction it came through
-    if r20_pnl <= 0 or r20_slip is None:
+    # 5. Recent Form (10 pts) - recent return judged against the friction it came through
+    if r20_pnl <= 0 or r20_slip is None or avg_inv <= 0:
         rf_score = 0.0
     else:
         slip_factor = 1.0 - (min(max(r20_slip, 0.0), RECENT_FORM_SLIP_CEILING_PCT)
                              / RECENT_FORM_SLIP_CEILING_PCT)
-        pnl_factor = min(r20_pnl / RECENT_FORM_FULL_MARKS_PNL_USD, 1.0)
-        rf_score = 10.0 * slip_factor * pnl_factor
+        recent_return = r20_pnl / (RECENT_FORM_WINDOW_TRADES * avg_inv)
+        return_factor = min(recent_return / RECENT_FORM_FULL_MARKS_RETURN, 1.0)
+        rf_score = 10.0 * slip_factor * return_factor
     score += rf_score
     breakdown["5. Recent Form (10%)"] = round(rf_score, 2)
 
@@ -185,12 +404,12 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     breakdown["6. Daily Green Rate (8%)"] = round(days_score, 2)
 
     # 7. Profit/Loss Ratio (8 pts)
-    if pl_ratio <= 0.3:
+    if pl_ratio <= PL_RATIO_GATE:
         pl_score = 0.0
     elif pl_ratio >= 3.0:
         pl_score = 8.0
     else:
-        pl_score = 8.0 * ((pl_ratio - 0.3) / (3.0 - 0.3))
+        pl_score = 8.0 * ((pl_ratio - PL_RATIO_GATE) / (3.0 - PL_RATIO_GATE))
     score += pl_score
     breakdown["7. Profit/Loss Ratio (8%)"] = round(pl_score, 2)
 
@@ -213,20 +432,20 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     breakdown[f"8. Sizing Fit (${sizing_peak:.0f} Peak) (5%)"] = round(inv_score, 2)
 
     # 9. Hedged Control (5 pts)
-    if hedged > 3.0:
+    if hedged > HEDGED_RATE_GATE_PCT:
         hedged_score = 0.0
     else:
-        hedged_score = 5.0 * (1.0 - (hedged / 3.0))
+        hedged_score = 5.0 * (1.0 - (hedged / HEDGED_RATE_GATE_PCT))
     score += hedged_score
     breakdown["9. Hedged Control < 3% (5%)"] = round(hedged_score, 2)
 
     # 10. Markets Sample (3 pts)
-    if mkts < 20:
+    if mkts < MARKETS_GATE:
         mkt_score = 0.0
     elif mkts >= 200:
         mkt_score = 3.0
     else:
-        mkt_score = 3.0 * ((mkts - 20.0) / (200.0 - 20.0))
+        mkt_score = 3.0 * ((mkts - MARKETS_GATE) / (200.0 - MARKETS_GATE))
     score += mkt_score
     breakdown["10. Markets Sample (3%)"] = round(mkt_score, 2)
 
@@ -238,19 +457,10 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
 
     final_score = round(score, 2)
 
-    
     if len(rejection_reasons) > 0:
         grade = f"REJECT ({rejection_reasons[0]})"
-    elif final_score >= 90.0:
-        grade = "S-Tier (God-Tier Target)"
-    elif final_score >= 80.0:
-        grade = "A-Tier (Strong Copy Target)"
-    elif final_score >= 70.0:
-        grade = "B-Tier (Moderate Copy Target)"
-    elif final_score >= 50.0:
-        grade = "C-Tier (High Risk / Volatile)"
     else:
-        grade = "F-Tier (Toxic / Rejection)"
+        grade = grade_for_score(final_score)
 
     # Bankroll Sizing Controls & Caps, all stated by the Copy Execution Profile
     max_single_position_usd = profile.max_single_position_usd

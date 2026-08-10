@@ -32,7 +32,7 @@ elsewhere.
 _Avoid_: filter, threshold, cutoff
 
 **Copyability Score**:
-A weighted sum out of 100 used to triage candidates cheaply. It orders wallets for further work; it
+A weighted sum used to triage candidates cheaply. It orders wallets for further work; it
 is not the verdict. A parameter whose input could not be measured contributes nothing to the sum,
 so an unmeasured wallet scores low rather than scoring well by default.
 _Avoid_: rating, grade, rank

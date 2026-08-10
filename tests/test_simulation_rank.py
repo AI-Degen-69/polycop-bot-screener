@@ -2,6 +2,41 @@ import pytest
 from app.src.execution.copy_execution_profile import CURRENT_PROFILE
 from app.src.pipeline.phase3_simulation_rank import run_phase3_simulation_rank
 
+def test_scan_rank_is_stamped_from_the_final_ordering():
+    """Rank within the scan is read off the published order, 1-based.
+
+    Stamped after sorting so it always matches the order the feed ships,
+    including on the degraded path where the fallback ordering differs.
+    """
+    def ok_fetcher(payload):
+        return {"sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else 80.0, "target_total_pnl": 500.0, "logs": [{"type": "INTERCEPT"}]}
+
+    out = run_phase3_simulation_rank(
+        targets=[
+            {"address": "0x1111", "name": "T1", "final_score": 70.0, "grade": "B-Tier", "metrics": {"avg_invest": 25.0}},
+            {"address": "0x2222", "name": "T2", "final_score": 90.0, "grade": "S-Tier", "metrics": {"avg_invest": 25.0}},
+        ],
+        profile=CURRENT_PROFILE,
+        fetcher=ok_fetcher,
+    )
+    assert [r["scan_rank"] for r in out["simulated_targets"]] == [1, 2]
+
+    # The degraded path ranks by triage score, and the rank follows that order.
+    def failing_fetcher(payload):
+        raise RuntimeError("Network down")
+
+    degraded = run_phase3_simulation_rank(
+        targets=[
+            {"address": "0x1111", "name": "T1", "final_score": 70.0, "grade": "B-Tier", "metrics": {"avg_invest": 25.0}},
+            {"address": "0x2222", "name": "T2", "final_score": 90.0, "grade": "S-Tier", "metrics": {"avg_invest": 25.0}},
+        ],
+        profile=CURRENT_PROFILE,
+        fetcher=failing_fetcher,
+    )
+    assert [r["address"] for r in degraded["simulated_targets"]] == ["0x2222", "0x1111"]
+    assert [r["scan_rank"] for r in degraded["simulated_targets"]] == [1, 2]
+
+
 def test_simulation_rank_ordering_and_tier_assignment():
     """Verify targets are ranked by edge retention and assigned simulated tiers."""
     sample_targets = [

@@ -196,6 +196,13 @@ def run_phase3_simulation_rank(
         # Rank survivors by Edge Retention descending
         simulated_results.sort(key=lambda x: (x.get("edge_retention") or 0.0, x.get("triage_copyability_score") or 0.0), reverse=True)
 
+    # The rank a wallet holds within this scan, read off the final ordering
+    # (1-based). It travels beside the tier so a reader sees both where a wallet
+    # sits and why it sits there. Stamped after sorting so it always reflects
+    # the ordering the feed actually ships, whichever branch produced it.
+    for index, entry in enumerate(simulated_results, start=1):
+        entry["scan_rank"] = index
+
     summary = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "copy_execution_profile": dict(profile.as_dict(), fingerprint=profile.fingerprint),

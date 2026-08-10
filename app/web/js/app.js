@@ -315,6 +315,25 @@ function renderTierCell(t) {
     `;
 }
 
+function renderRankCell(t) {
+    // Where the wallet sits in this scan, alongside its verdict. Stamped by
+    // the pipeline from the final ordering, so it is never recomputed here.
+    if (t.scan_rank === null || t.scan_rank === undefined) {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">Scan Rank</span>
+                <span class="summary-val tier-unsimulated">—</span>
+            </div>
+        `;
+    }
+    return `
+        <div class="summary-cell">
+            <span class="summary-lbl">Scan Rank</span>
+            <span class="summary-val rank-number">#${t.scan_rank}</span>
+        </div>
+    `;
+}
+
 function renderRetentionCell(t) {
     const retention = t.edge_retention;
     if (retention === null || retention === undefined) {
@@ -360,12 +379,11 @@ function renderGrid() {
                 <button class="btn-copy-mini" onclick="copyAddressToClipboard(event, '${t.address}')" title="Copy address to clipboard">📋 Copy Address</button>
             </div>
         `;
-        const gemBadgeHtml = isGem ? `
-            <div class="badge-gem-wrapper">
+        const gemBadgeHtml = isGem ? `                <div class="badge-gem-wrapper">
                 <span class="badge-gem">💎 GEM</span>
                 <div class="gem-tooltip-text">
                     <strong>💎 Hidden Gem Detected!</strong><br>
-                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
+                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;65)</strong>!
                 </div>
             </div>
         ` : '';
@@ -412,6 +430,7 @@ function renderGrid() {
                         <span class="summary-lbl">Avg Invest</span>
                         <span class="summary-val">$${t.metrics.avg_invest}</span>
                     </div>
+                    ${renderRankCell(t)}
                     <div class="summary-cell">
                         <span class="summary-lbl">Last Active</span>
                         <span class="summary-val activity-val" data-tier="${lastActive.tier}">${lastActive.text}</span>
@@ -481,6 +500,7 @@ function openModal(idx) {
     document.getElementById("modalGradeBadge").innerText = target.verdict_source === "simulation" && target.tier
         ? `${target.tier} (simulated)`
         : `${target.grade} (triage only)`;
+    document.getElementById("modalRankBadge").innerText = target.scan_rank ? `#${target.scan_rank}` : "—";
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
     renderBalanceMiss(target);
     document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
@@ -540,19 +560,33 @@ function renderParamBars(target) {
     const container = document.getElementById("paramBarsContainer");
     const b = target.breakdown || {};
 
+    // The eleven reweighted parameters, keyed exactly as the engine names them.
+    // A renamed key here would silently render every bar empty, so these are
+    // kept in lockstep with the engine's breakdown output.
     const maxScores = {
-        "1. Slippage Cost Rate (20%)": 20,
-        "2. Recent 20 PnL & Slip (15%)": 15,
-        "3. Hedged Control < 3% (15%)": 15,
-        "4. Daily Green Rate (15%)": 15,
-        "5. Recent 20 Win Rate (10%)": 10,
-        "6. Profit/Loss Ratio (10%)": 10,
-        "7. Capital Efficiency (5%)": 5,
-        "8. Markets Sample (5%)": 5,
-        "9. Continuous Sizing Fit ($25 Peak) (5%)": 5
+        "1. Edge-to-Friction Ratio (22%)": 22,
+        "2. Slippage Cost Rate (15%)": 15,
+        "3. Drawdown Depth (12%)": 12,
+        "4. Copyable Window Share (10%)": 10,
+        "5. Recent Form (10%)": 10,
+        "6. Daily Green Rate (8%)": 8,
+        "7. Profit/Loss Ratio (8%)": 8,
+        "9. Hedged Control < 3% (5%)": 5,
+        "10. Markets Sample (3%)": 3,
+        "11. Capital Efficiency (2%)": 2
     };
+    // Sizing Fit's key embeds the profile-derived peak, so it is matched
+    // separately rather than hard-coded.
+    const sizingKey = Object.keys(b).find(k => k.startsWith("8. Sizing Fit"));
+    if (sizingKey) maxScores[sizingKey] = 5;
 
-    container.innerHTML = Object.keys(maxScores).map(key => {
+    const keys = Object.keys(maxScores);
+    if (keys.length === 0 || !keys.some(k => b[k] !== undefined)) {
+        container.innerHTML = `<div class="bm-empty">No breakdown was carried through for this wallet.</div>`;
+        return;
+    }
+
+    container.innerHTML = keys.map(key => {
         const score = b[key] || 0.0;
         const max = maxScores[key];
         const pct = Math.min((score / max) * 100, 100);
@@ -578,31 +612,39 @@ function renderRadarChart(target) {
     const getScorePct = (score, max) => Math.round(Math.min(Math.max((score / max) * 100, 0), 100));
     const b = target.breakdown || {};
 
+    // Sizing Fit's key embeds the profile-derived peak, so it is matched by
+    // prefix rather than hard-coded, mirroring renderParamBars.
+    const sizingKey = Object.keys(b).find(k => k.startsWith("8. Sizing Fit"));
+
     const radarValues = [
-        getScorePct(b["1. Slippage Cost Rate (20%)"] || 0, 20),
-        getScorePct(b["2. Recent 20 PnL & Slip (15%)"] || 0, 15),
-        getScorePct(b["3. Hedged Control < 3% (15%)"] || 0, 15),
-        getScorePct(b["4. Daily Green Rate (15%)"] || 0, 15),
-        getScorePct(b["5. Recent 20 Win Rate (10%)"] || 0, 10),
-        getScorePct(b["6. Profit/Loss Ratio (10%)"] || 0, 10),
-        getScorePct(b["7. Capital Efficiency (5%)"] || 0, 5),
-        getScorePct(b["8. Markets Sample (5%)"] || 0, 5),
-        getScorePct(b["9. Continuous Sizing Fit ($25 Peak) (5%)"] || 0, 5)
+        getScorePct(b["1. Edge-to-Friction Ratio (22%)"] || 0, 22),
+        getScorePct(b["2. Slippage Cost Rate (15%)"] || 0, 15),
+        getScorePct(b["3. Drawdown Depth (12%)"] || 0, 12),
+        getScorePct(b["4. Copyable Window Share (10%)"] || 0, 10),
+        getScorePct(b["5. Recent Form (10%)"] || 0, 10),
+        getScorePct(b["6. Daily Green Rate (8%)"] || 0, 8),
+        getScorePct(b["7. Profit/Loss Ratio (8%)"] || 0, 8),
+        getScorePct(sizingKey ? (b[sizingKey] || 0) : 0, 5),
+        getScorePct(b["9. Hedged Control < 3% (5%)"] || 0, 5),
+        getScorePct(b["10. Markets Sample (3%)"] || 0, 3),
+        getScorePct(b["11. Capital Efficiency (2%)"] || 0, 2)
     ];
 
     radarChartInstance = new Chart(ctx, {
         type: 'radar',
         data: {
             labels: [
-                'Slippage Cost (20%)',
-                'Recent 20 PnL (15%)',
-                'Hedged Control (15%)',
-                'Daily Green (15%)',
-                'Win Rate (10%)',
-                'P/L Ratio (10%)',
-                'Efficiency (5%)',
-                'Sample Size (5%)',
-                'Sizing Fit (5%)'
+                'Edge/Friction (22%)',
+                'Slippage Cost (15%)',
+                'Drawdown (12%)',
+                'Window Share (10%)',
+                'Recent Form (10%)',
+                'Green Rate (8%)',
+                'P/L Ratio (8%)',
+                'Sizing Fit (5%)',
+                'Hedged (5%)',
+                'Markets (3%)',
+                'Efficiency (2%)'
             ],
             datasets: [{
                 label: 'Screener Score %',
