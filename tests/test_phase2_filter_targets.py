@@ -134,10 +134,17 @@ class TestWindowShareReachesTheEngineWhenSimulated(unittest.TestCase):
             "0xsimulated",
             run_mock_response={
                 "sim_total_pnl": 240.0,
+                # Ten target entries, six of which the window admitted, plus
+                # two exits that belong in neither term — see spike 0002.
                 "logs": (
-                    [{"type": "INTERCEPT"}] * 6
-                    + [{"type": "SKIP_FILTER"}] * 3
-                    + [{"type": "SKIP_CAP"}]
+                    [{"type": "BUY", "action": "BUY",
+                      "msg": "[m] Target BUY 10.00 shares @ $0.500."}] * 5
+                    + [{"type": "WARNING", "action": "SKIP_CAP",
+                        "msg": "[m] Target BUY 10.00 shares. Skipped: Hit Risk Cap Limits."}]
+                    + [{"type": "INTERCEPT", "action": "SKIP_FILTER",
+                        "msg": "[m] Target BUY 10.00 shares @ $0.500. Sim skipped: Target size out of bounds"}] * 4
+                    + [{"type": "INTERCEPT", "action": "INTERCEPT",
+                        "msg": "[m] Target SELL 10.00 shares. Sim inventory is 0. [INTERCEPTED] Ghost Position."}] * 2
                 ),
             },
         )
@@ -149,7 +156,7 @@ class TestWindowShareReachesTheEngineWhenSimulated(unittest.TestCase):
         self.assertAlmostEqual(self.target["copyable_window_share"], 0.6, places=4)
 
     def test_the_measured_share_is_scored(self):
-        # Six of ten decisions were copyable, so six of ten points.
+        # Six of ten entry signals were copyable, so six of ten points.
         self.assertAlmostEqual(_points(self.target, "Copyable Window Share"), 6.0, places=2)
 
 

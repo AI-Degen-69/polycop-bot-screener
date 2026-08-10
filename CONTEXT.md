@@ -107,8 +107,9 @@ A target's average round-trip edge divided by expected round-trip friction. Belo
 uncopyable by arithmetic regardless of any other metric.
 
 **Copyable Window Share**:
-The share of a target's trades falling inside the copyable trade window. Measures how much of the
-target's behaviour the follower gets to replicate at all.
+The share of a target's entry signals falling inside the copyable trade window. Measures how much of
+the target's behaviour the follower gets to replicate at all. Entries only: the window is a range of
+sizes and has a say where a position is opened, while exits inherit whatever the entry did.
 
 **Hedged Rate**:
 The share of a target's markets held on both sides at once. Read as a market-making signature, and
