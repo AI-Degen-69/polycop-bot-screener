@@ -141,6 +141,63 @@ def test_the_feed_carries_what_the_page_needs_from_triage(fetcher_name):
     assert row["bankroll_analysis"]["min_target_order_floor_usd"] == 8.33
 
 
+def _fetcher_with_market_stats(market_stats):
+    def fetcher(payload):
+        return {
+            "sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else 80.0,
+            "target_total_pnl": 500.0,
+            "logs": [{"type": "INTERCEPT"}, {"type": "BUY", "action": "SKIP_FILTER"}],
+            "market_stats": market_stats,
+        }
+    return fetcher
+
+
+def test_balance_miss_reports_the_markets_the_bankroll_could_not_fund():
+    """Balance Miss comes off `market_stats`, not the decision logs.
+
+    The logs answer why a trade was filtered out; only `sim_missed_amount`
+    says the money ran out. Reading the miss off the logs finds nothing and
+    reports every wallet as fully funded.
+    """
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=_fetcher_with_market_stats([
+            {"title": "Fed cuts in March?", "sim_missed_amount": 12.5},
+            {"title": "Funded market", "sim_missed_amount": 0.0},
+            {"title": "Biggest miss", "sim_missed_amount": 40.0},
+        ]),
+    )
+    misses = out["simulated_targets"][0]["balance_miss_details"]
+
+    # Markets that funded everything are dropped, largest miss first.
+    assert misses == [
+        {"market": "Biggest miss", "amount": 40.0},
+        {"market": "Fed cuts in March?", "amount": 12.5},
+    ]
+
+
+def test_balance_miss_is_empty_when_every_copyable_trade_was_funded():
+    """An empty list is the only honest way to claim the bankroll held."""
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=_fetcher_with_market_stats([
+            {"title": "Funded market", "sim_missed_amount": 0.0},
+        ]),
+    )
+
+    assert out["simulated_targets"][0]["balance_miss_details"] == []
+
+
+def test_balance_miss_survives_a_response_without_market_stats():
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+
+    assert out["simulated_targets"][0]["balance_miss_details"] == []
+
+
 def test_the_feed_states_the_profile_its_numbers_were_computed_under():
     out = run_phase3_simulation_rank(
         targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher

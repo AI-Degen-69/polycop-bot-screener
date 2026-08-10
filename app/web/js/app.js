@@ -425,13 +425,14 @@ function renderBalanceMiss(target) {
     const host = document.getElementById("modalBalanceMiss");
     if (!host) return;
 
-    const logs = target.balance_miss_details || [];
     if (target.verdict_source !== "simulation") {
         host.innerHTML = `<div class="bm-empty">No Simulated Copy Run, so no per-market record exists.</div>`;
         return;
     }
 
-    const missed = logs.filter(l => (l.type || l.status) === "SKIP_NO_BALANCE");
+    // The pipeline already dropped the markets that funded everything, so every
+    // entry here is a miss and an empty list means the bankroll held.
+    const missed = target.balance_miss_details || [];
     if (missed.length === 0) {
         host.innerHTML = `<div class="bm-ok">✅ Every copyable trade was funded — the bankroll never ran dry.</div>`;
         return;
@@ -439,7 +440,7 @@ function renderBalanceMiss(target) {
 
     const rows = missed.slice(0, 12).map(l => `
         <div class="bm-row">
-            <span class="bm-market">${l.market || l.title || "Unnamed market"}</span>
+            <span class="bm-market">${l.market || "Unnamed market"}</span>
             <span class="bm-amount">${l.amount !== undefined ? `$${Number(l.amount).toFixed(2)}` : ""}</span>
         </div>
     `).join("");
