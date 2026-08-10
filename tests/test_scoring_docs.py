@@ -77,67 +77,74 @@ class TestWebUiLabelsAreRenderedFromTheCode(unittest.TestCase):
                 self.assertRegex(text, label["pattern"])
                 self.assertIn(label["expected"], text)
 
-    def _stale_variant(self, index):
-        """The label entry's expected string with its value swapped to 99, so a
+    def _stale_variant(self, entry):
+        """A label entry's expected string with its value swapped to 99, so a
         tamper stays meaningful no matter what the constants currently are."""
-        return re.sub(r"\d+", "99", scoring_docs.UI_LABELS[index]["expected"])
+        return re.sub(r"\d+", "99", entry["expected"])
+
+    def _label(self, description):
+        """The UI_LABELS entry whose description matches, found by name so the
+        tamper tests do not depend on list order."""
+        return next(l for l in scoring_docs.UI_LABELS if l["description"] == description)
+
+    def _tamper_ui(self, entry, tampered_text):
+        """Write `tampered_text` into a temp copy of the entry's file and check
+        the drift check against that copy."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        doc = os.path.join(tmp, os.path.basename(entry["relpath"]))
+        with open(doc, "w", encoding="utf-8") as f:
+            f.write(tampered_text)
+        return scoring_docs.check(ui_overrides={entry["relpath"]: doc})
+
+    def _read_real(self, relpath):
+        with open(os.path.join(PROJECT_ROOT, relpath), "r", encoding="utf-8") as f:
+            return f.read()
 
     def test_a_stale_stat_pill_label_fails_the_check(self):
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp)
-        doc = os.path.join(tmp, "index.html")
-        real = os.path.join(PROJECT_ROOT, "app", "web", "index.html")
-        with open(real, "r", encoding="utf-8") as f:
-            tampered = f.read().replace(
-                scoring_docs.UI_LABELS[0]["expected"], self._stale_variant(0)
-            )
-        with open(doc, "w", encoding="utf-8") as f:
-            f.write(tampered)
-        self.assertEqual(
-            scoring_docs.check(ui_overrides={
-                os.path.join("app", "web", "index.html"): doc
-            }),
-            1,
+        entry = self._label("S-Tier stat pill floor")
+        tampered = self._read_real(entry["relpath"]).replace(
+            entry["expected"], self._stale_variant(entry)
         )
+        self.assertEqual(self._tamper_ui(entry, tampered), 1)
 
     def test_a_stale_gem_tooltip_label_fails_the_check(self):
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp)
-        doc = os.path.join(tmp, "app.js")
-        real = os.path.join(PROJECT_ROOT, "app", "web", "js", "app.js")
-        with open(real, "r", encoding="utf-8") as f:
-            tampered = f.read().replace(
-                scoring_docs.UI_LABELS[3]["expected"], self._stale_variant(3)
-            )
-        with open(doc, "w", encoding="utf-8") as f:
-            f.write(tampered)
-        self.assertEqual(
-            scoring_docs.check(ui_overrides={
-                os.path.join("app", "web", "js", "app.js"): doc
-            }),
-            1,
+        entry = self._label("gem tooltip site-score ceiling")
+        tampered = self._read_real(entry["relpath"]).replace(
+            entry["expected"], self._stale_variant(entry)
         )
+        self.assertEqual(self._tamper_ui(entry, tampered), 1)
+
+    def test_a_stale_gate_tooltip_value_fails_the_check(self):
+        entry = self._label("Profit/Loss gate tooltip value")
+        tampered = self._read_real(entry["relpath"]).replace(
+            entry["expected"], self._stale_variant(entry)
+        )
+        self.assertEqual(self._tamper_ui(entry, tampered), 1)
+
+    def test_a_stale_weight_percentage_fails_the_check(self):
+        entry = self._label("Edge-to-Friction Ratio bar entry")
+        tampered = self._read_real(entry["relpath"]).replace(
+            entry["expected"], self._stale_variant(entry)
+        )
+        self.assertEqual(self._tamper_ui(entry, tampered), 1)
+
+    def test_a_stale_gate_count_fails_the_check(self):
+        entry = self._label("hard rejection gate count (gem tooltip)")
+        tampered = self._read_real(entry["relpath"]).replace(
+            entry["expected"], self._stale_variant(entry)
+        )
+        self.assertEqual(self._tamper_ui(entry, tampered), 1)
 
     def test_a_stale_duplicate_in_the_same_format_fails_the_check(self):
         # The expected string still exists (so a plain substring check would
         # pass), but a second label in the same format carries a stale value.
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp)
-        doc = os.path.join(tmp, "index.html")
-        real = os.path.join(PROJECT_ROOT, "app", "web", "index.html")
-        with open(real, "r", encoding="utf-8") as f:
-            tampered = f.read().replace(
-                scoring_docs.UI_LABELS[0]["expected"],
-                scoring_docs.UI_LABELS[0]["expected"] + " " + self._stale_variant(0),
-            )
-        with open(doc, "w", encoding="utf-8") as f:
-            f.write(tampered)
-        self.assertEqual(
-            scoring_docs.check(ui_overrides={
-                os.path.join("app", "web", "index.html"): doc
-            }),
-            1,
+        entry = self._label("S-Tier stat pill floor")
+        tampered = self._read_real(entry["relpath"]).replace(
+            entry["expected"],
+            entry["expected"] + " " + self._stale_variant(entry),
         )
+        self.assertEqual(self._tamper_ui(entry, tampered), 1)
 
 
 class TestGenerateIsIdempotent(unittest.TestCase):

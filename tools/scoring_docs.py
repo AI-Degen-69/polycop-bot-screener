@@ -34,7 +34,15 @@ SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from screener.score_wallets import GEM_SITE_SCORE_MAX, SCORING_SPEC  # noqa: E402
+from screener.score_wallets import (  # noqa: E402
+    BACKTEST_COPY_PNL_MIN_USD,
+    GEM_SITE_SCORE_MAX,
+    HEDGED_RATE_GATE_PCT,
+    MARKETS_GATE,
+    PL_RATIO_GATE,
+    SCORING_SPEC,
+)
+from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
 
 BEGIN_MARKER = "<!-- SCORING-SPEC:BEGIN -->"
 END_MARKER = "<!-- SCORING-SPEC:END -->"
@@ -96,6 +104,147 @@ UI_LABELS = [
         "pattern": r"A-Tier Screener Score \(&ge;\d+\)",
     },
 ]
+
+# Gate values, the gate count and the bankroll as they appear in the web
+# assets. The gem card's gate count and the tooltip gate values all trace to
+# SCORING_SPEC constants, so a gate recalibration regenerates them the same way
+# a band recalibration regenerates the tier pills.
+GATE_AND_PROFILE_LABELS = [
+    {
+        "relpath": os.path.join("app", "web", "index.html"),
+        "description": "Toxic Copy Poison gate tooltip value",
+        "expected": f"&lt; ${BACKTEST_COPY_PNL_MIN_USD:.0f} (Toxic Copy Poison)",
+        "pattern": r"&lt; \$\d+ \(Toxic Copy Poison\)",
+    },
+    {
+        "relpath": os.path.join("app", "web", "index.html"),
+        "description": "Profit/Loss gate tooltip value",
+        "expected": f"&lt; {PL_RATIO_GATE:.1f}x",
+        "pattern": r"&lt; [\d.]+x",
+    },
+    {
+        "relpath": os.path.join("app", "web", "index.html"),
+        "description": "Markets Sample gate tooltip value",
+        "expected": f"Rejects &lt; {MARKETS_GATE:.0f} (lucky streak risk)",
+        "pattern": r"Rejects &lt; \d+ \(lucky streak risk\)",
+    },
+    {
+        "relpath": os.path.join("app", "web", "js", "app.js"),
+        "description": "hard rejection gate count (gem tooltip)",
+        "expected": f"passes all {len(SCORING_SPEC['gates'])} Hard Rejection Gates",
+        "pattern": r"passes all \d+ Hard Rejection Gates",
+    },
+    {
+        "relpath": os.path.join("app", "web", "index.html"),
+        "description": "copy bankroll phrase",
+        "expected": f"${CURRENT_PROFILE.bankroll_usd:.0f} Bankroll",
+        "pattern": r"\$\d+ Bankroll",
+    },
+    {
+        "relpath": os.path.join("app", "web", "index.html"),
+        "description": "copy bankroll phrase (prose)",
+        "expected": f"${CURRENT_PROFILE.bankroll_usd:.0f} bankroll",
+        "pattern": r"\$\d+ bankroll",
+    },
+]
+
+# The short display names the radar chart uses, keyed by each parameter's
+# canonical SCORING_SPEC name. A parameter rename in the spec fails the check
+# loudly (the name anchors the long-key entries below).
+RADAR_SHORT_NAMES = {
+    "Edge-to-Friction Ratio": "Edge/Friction",
+    "Slippage Cost Rate": "Slippage Cost",
+    "Drawdown Depth": "Drawdown",
+    "Copyable Window Share": "Window Share",
+    "Recent Form": "Recent Form",
+    "Daily Green Rate": "Green Rate",
+    "Profit/Loss Ratio": "P/L Ratio",
+    "Sizing Fit": "Sizing Fit",
+    "Hedged Control": "Hedged",
+    "Markets Sample": "Markets",
+    "Capital Efficiency": "Efficiency",
+}
+
+
+def _weight_label_entries():
+    """The app.js bars and radar pin their percentages and maxima to the
+    SCORING_SPEC points, so a reweight cannot silently leave the UI stale.
+
+    Three shapes per parameter: the bar entry (breakdown key + max value), the
+    radar value lookup (same key + max argument) and the radar's short label.
+    Sizing Fit's source key is a placeholder (its peak is profile-derived and
+    substituted at runtime), and the Hedged Control key embeds the hedged
+    gate, so those two are pinned with their exact literals.
+    """
+    entries = []
+    js = os.path.join("app", "web", "js", "app.js")
+    for index, param in enumerate(SCORING_SPEC["parameters"], start=1):
+        points = param["points"]
+        name = param["name"]
+        radar = RADAR_SHORT_NAMES[name]
+        if name == "Sizing Fit":
+            entries.extend([
+                {
+                    "relpath": js,
+                    "description": f"{name} bar entry",
+                    "expected": f'"{index}. Sizing Fit": sizingKey ? {points} : null',
+                    "pattern": rf'"{index}\. Sizing Fit": sizingKey \? \d+ : null',
+                },
+                {
+                    "relpath": js,
+                    "description": f"{name} runtime peak assignment",
+                    "expected": f"maxScores[sizingKey] = {points};",
+                    "pattern": r"maxScores\[sizingKey\] = \d+;",
+                },
+                {
+                    "relpath": js,
+                    "description": f"{name} radar value",
+                    "expected": f"getScorePct(sizingKey ? (b[sizingKey] || 0) : 0, {points}),",
+                    "pattern": r"getScorePct\(sizingKey \? \(b\[sizingKey\] \|\| 0\) : 0, \d+\),",
+                },
+            ])
+        elif name == "Hedged Control":
+            hedged_pct = f"{HEDGED_RATE_GATE_PCT:.0f}%"
+            entries.extend([
+                {
+                    "relpath": js,
+                    "description": f"{name} bar entry",
+                    "expected": f'"{index}. Hedged Control < {hedged_pct} ({points}%)": {points}',
+                    "pattern": rf'"{index}\. Hedged Control < [\d.]+% \(\d+%\)": \d+',
+                },
+                {
+                    "relpath": js,
+                    "description": f"{name} radar value",
+                    "expected": f'b["{index}. Hedged Control < {hedged_pct} ({points}%)"] || 0, {points})',
+                    "pattern": rf'b\["{index}\. Hedged Control < [\d.]+% \(\d+%\)"\] \|\| 0, \d+\)',
+                },
+            ])
+        else:
+            entries.extend([
+                {
+                    "relpath": js,
+                    "description": f"{name} bar entry",
+                    "expected": f'"{index}. {name} ({points}%)": {points}',
+                    "pattern": rf'"{index}\. {re.escape(name)} \(\d+%\)": \d+',
+                },
+                {
+                    "relpath": js,
+                    "description": f"{name} radar value",
+                    "expected": f'b["{index}. {name} ({points}%)"] || 0, {points})',
+                    "pattern": rf'b\["{index}\. {re.escape(name)} \(\d+%\)"\] \|\| 0, \d+\)',
+                },
+            ])
+        entries.append({
+            "relpath": js,
+            "description": f"{name} radar label",
+            "expected": f"'{radar} ({points}%)'",
+            "pattern": rf"'{re.escape(radar)} \(\d+%\)'",
+        })
+    return entries
+
+
+UI_LABELS.extend(GATE_AND_PROFILE_LABELS)
+UI_LABELS.extend(_weight_label_entries())
 
 
 def render_block() -> str:
