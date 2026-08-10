@@ -3,11 +3,16 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from paths import DATA_DIR, PHASE1_FILE, PHASE2_FILE
+from paths import DATA_DIR, PHASE1_FILE, PHASE2_FILE, PHASE3_FILE
 
 FILES_TO_REMOVE = [
     os.path.join(DATA_DIR, PHASE1_FILE),
-    os.path.join(DATA_DIR, PHASE2_FILE)
+    os.path.join(DATA_DIR, PHASE2_FILE),
+    # The page reads the phase3 feed (via /api/feed/v1), so clearing must
+    # empty the grid, not delete files nothing renders. With the feed gone
+    # the endpoint 404s, the UI shows its empty state, and the next
+    # screen.py launch re-runs the pipeline from scratch.
+    os.path.join(DATA_DIR, PHASE3_FILE)
 ]
 
 def reset_data_cache():

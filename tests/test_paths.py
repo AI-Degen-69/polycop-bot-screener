@@ -4,9 +4,10 @@
 Every directory and dataset filename is derived in one place
 (app/src/paths.py), so a renamed file or a moved directory cannot split the
 pipeline's writers from its readers. These tests pin that contract: the
-constants resolve to real locations, a cache reset never touches the feed,
-and no app/src module re-creates its own path bootstrap or hardcodes a
-dataset filename where the constant should be used.
+constants resolve to real locations, a cache reset clears the whole dataset
+including the feed the page reads, and no app/src module re-creates its own
+path bootstrap or hardcodes a dataset filename where the constant should be
+used.
 """
 import os
 import re
@@ -63,18 +64,25 @@ class TestPathsResolve(unittest.TestCase):
         self.assertTrue(hasattr(tools_mod, "discover_markets"))
 
 
-class TestTheFeedSurvivesACacheReset(unittest.TestCase):
-    def test_reset_data_cache_deletes_only_the_pre_feed_phase_files(self):
-        """The feed is the file screen.py checks for staleness and the page
-        serves; a cache reset must never delete it."""
+class TestACacheResetClearsTheWholeDataset(unittest.TestCase):
+    def test_reset_data_cache_deletes_every_phase_file_including_the_feed(self):
+        """Clear Data must actually clear the data the page shows. The page
+        reads the phase3 feed (via /api/feed/v1), so a reset that stops at
+        the pre-feed phase files deletes files nothing renders, then the
+        reload refills the grid from the untouched feed — the button visibly
+        does nothing. All three phase files must go, so the next fetch 404s
+        and the page shows its empty state."""
         from pipeline.reset_data_cache import FILES_TO_REMOVE
 
         self.assertEqual(
             FILES_TO_REMOVE,
-            [os.path.join(DATA_DIR, PHASE1_FILE), os.path.join(DATA_DIR, PHASE2_FILE)],
+            [
+                os.path.join(DATA_DIR, PHASE1_FILE),
+                os.path.join(DATA_DIR, PHASE2_FILE),
+                os.path.join(DATA_DIR, PHASE3_FILE),
+            ],
         )
-        for filepath in FILES_TO_REMOVE:
-            self.assertNotIn("phase3", os.path.basename(filepath))
+        self.assertIn("phase3", os.path.basename(FILES_TO_REMOVE[-1]))
 
     def test_screen_checks_the_same_file_phase3_writes(self):
         """screen.py's staleness file is the constant phase3 writes, not a
