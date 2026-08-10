@@ -58,7 +58,7 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 
 
 
-**Data Evidence Requirement**: Present the numerical breakdown for all 11 weighted parameters alongside the final grade.
+**Data Evidence Requirement**: Present the numerical breakdown for every weighted parameter alongside the final grade, as the engine reports it in `breakdown`.
 
 ### Response Formatting Rules
 1. **No Time Estimates**: Do NOT include minute counts or time duration estimates (e.g., mins count) in responses.
