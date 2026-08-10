@@ -265,7 +265,13 @@ function filterAndRender() {
     }
     else if (sortVal === "score-desc") filteredTargets.sort((a, b) => b.final_score - a.final_score);
     else if (sortVal === "score-asc") filteredTargets.sort((a, b) => a.final_score - b.final_score);
-    else if (sortVal === "pnl-desc") filteredTargets.sort((a, b) => b.metrics.copy_pnl - a.metrics.copy_pnl);
+    else if (sortVal === "pnl-desc") {
+        // The verdict's PnL is the simulated figure. An unsimulated wallet has
+        // no simulated PnL to rank on, so it sorts below every simulated
+        // wallet rather than being treated as a zero.
+        filteredTargets.sort((a, b) =>
+            ((b.simulated_copy_pnl_10 ?? -Infinity) - (a.simulated_copy_pnl_10 ?? -Infinity)));
+    }
     else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => b.metrics.r20_win_rate - a.metrics.r20_win_rate);
     else if (sortVal === "polycop-desc") filteredTargets.sort((a, b) => b.metrics.polycop_site_score - a.metrics.polycop_site_score);
     else if (sortVal === "activity-desc") filteredTargets.sort((a, b) => activityHours(a) - activityHours(b));
@@ -300,9 +306,12 @@ function formatShare(value) {
     return (value === null || value === undefined) ? "Not measured" : `${(value * 100).toFixed(0)}%`;
 }
 
-function renderVerdictMetricCell(t, field, label) {
+function renderVerdictMetricCell(t, field, label, format) {
     // A verdict figure no simulation produced is not a figure of zero: the
     // row says so, telling a triage-only row from a measured verdict row.
+    // `format` renders the measured value (percent by default; PnL passes a
+    // dollar formatter).
+    const fmt = format || ((v) => `${v}%`);
     const val = t[field];
     if (t.verdict_source !== "simulation") {
         return `
@@ -323,7 +332,7 @@ function renderVerdictMetricCell(t, field, label) {
     return `
         <div class="summary-cell">
             <span class="summary-lbl">${label}</span>
-            <span class="summary-val">${val}%</span>
+            <span class="summary-val">${fmt(val)}</span>
         </div>
     `;
 }
@@ -453,6 +462,8 @@ function renderGrid() {
                             $${t.metrics.copy_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}
                         </span>
                     </div>
+                    ${renderVerdictMetricCell(t, 'simulated_copy_pnl_10', 'Simulated Copy PnL',
+                        (v) => '$' + v.toLocaleString('en-US', {minimumFractionDigits: 2}))}
                     ${renderTierCell(t)}
                     ${renderRetentionCell(t)}
                     <div class="summary-cell">

@@ -124,6 +124,13 @@ class TestTheNewFiguresAreRendered(unittest.TestCase):
         self.assertIn("retention-desc", self.index)
         self.assertIn("retention-desc", self.app_js)
 
+    def test_the_pnl_sort_reads_the_simulated_figure_not_the_leaderboard(self):
+        # The verdict page orders by the simulation's PnL, not the leaderboard's
+        # modelled figure — the same provenance rule as every other verdict metric.
+        self.assertIn("simulated_copy_pnl_10", self.app_js)
+        self.assertIn("Highest Simulated Copy PnL", self.index)
+        self.assertNotIn("b.metrics.copy_pnl - a.metrics.copy_pnl", self.app_js)
+
 
 class TestUnmeasuredFiguresAreNotShownAsZero(unittest.TestCase):
     def test_an_absent_share_reads_as_unmeasured(self):
