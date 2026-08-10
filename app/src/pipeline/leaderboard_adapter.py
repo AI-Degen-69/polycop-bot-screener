@@ -27,7 +27,6 @@ from screener.derived_metrics import (  # noqa: E402
     calculate_edge_to_friction,
 )
 from screener.simulated_copy_run import (  # noqa: E402
-    calculate_copyable_window_share,
     parse_simulated_run_response,
 )
 
@@ -56,7 +55,6 @@ def to_engine_metrics(profile: Dict[str, Any], slippage_pct: float) -> Dict[str,
     """
     mock_payload = profile.get("run_mock_response") or profile.get("mock_data")
     sim_summary = parse_simulated_run_response(mock_payload) if mock_payload else None
-    window_share = calculate_copyable_window_share(mock_payload) if mock_payload else None
     green_rate, observed_days = calculate_daily_green_rate(profile.get("daily_stats_json"))
     drawdown_depth = calculate_drawdown_depth(profile.get("all_pnl_json"))
     # Each fallback is tried only when the one before it is genuinely absent,
@@ -87,14 +85,12 @@ def to_engine_metrics(profile: Dict[str, Any], slippage_pct: float) -> Dict[str,
         "polycop_site_score": float(profile.get("polycop_site_score", profile.get("score", 0.0))),
         "buy_price": float(profile.get("buy_price", profile.get("avg_buy_price", 0.0))),
         "drawdown_depth": drawdown_depth,
-        "copyable_window_share": window_share,
         "edge_to_friction": edge_to_friction,
     }
 
     return {
         "raw_metrics": raw_metrics,
         "sim_summary": sim_summary,
-        "window_share": window_share,
         "green_rate": green_rate,
         "observed_days": observed_days,
         "drawdown_depth": drawdown_depth,

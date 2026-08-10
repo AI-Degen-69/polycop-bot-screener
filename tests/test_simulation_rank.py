@@ -190,6 +190,57 @@ def test_a_simulated_run_labels_its_verdict_as_simulated():
     assert row["tier"] is not None
 
 
+def test_the_verdict_side_window_share_is_published_from_the_10pct_run():
+    """ADR 0006: window share is simulation-only, so the feed's value is the
+    verdict side's measurement, never a triage default.
+
+    The share is computed from the 10%-slippage run's decision log: five BUY
+    entries, two refused by the size window, admit three of five.
+    """
+    def fetcher(payload):
+        logs = []
+        if payload["slippage"] == 10.0:
+            logs = [
+                {"type": "BUY", "action": "BUY",
+                 "msg": "[m] Target BUY 10.00 shares @ $0.500."},
+                {"type": "BUY", "action": "BUY",
+                 "msg": "[m] Target BUY 10.00 shares @ $0.500."},
+                {"type": "BUY", "action": "BUY",
+                 "msg": "[m] Target BUY 10.00 shares @ $0.500."},
+                {"type": "INTERCEPT", "action": "SKIP_FILTER",
+                 "msg": "[m] Target BUY 10.00 shares @ $0.500. Sim skipped: Target size out of bounds"},
+                {"type": "INTERCEPT", "action": "SKIP_FILTER",
+                 "msg": "[m] Target BUY 10.00 shares @ $0.500. Sim skipped: Target size out of bounds"},
+            ]
+        return {
+            "sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else 80.0,
+            "target_total_pnl": 500.0,
+            "logs": logs,
+        }
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "simulation"
+    assert row["copyable_window_share"] == 0.6
+
+
+def test_a_degraded_run_publishes_no_window_share():
+    """With no simulation there is no measured share, and none is fabricated."""
+    def failing_fetcher(payload):
+        raise RuntimeError("Network down")
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=failing_fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "triage"
+    assert row["copyable_window_share"] is None
+
+
 @pytest.mark.parametrize("fetcher_name", ["ok", "failing"])
 def test_the_feed_carries_what_the_page_needs_from_triage(fetcher_name):
     """Phase 3 publishes the feed the page reads, so anything it drops vanishes.

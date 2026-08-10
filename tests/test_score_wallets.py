@@ -51,7 +51,6 @@ class TestScoreWalletsEngine(unittest.TestCase):
             "markets": 150,
             "polycop_site_score": 85.0,
             "edge_to_friction": 2.5,
-            "copyable_window_share": 0.9,
             "drawdown_depth": 0.05,
         }
         res = calculate_bankroll_optimized_score(metrics, user_capital=100.0)
@@ -130,9 +129,22 @@ class TestUnmeasuredParametersFailClosed(unittest.TestCase):
         res = calculate_bankroll_optimized_score(_clean_metrics())
         self.assertEqual(_points(res, "Edge-to-Friction"), 0.0)
 
-    def test_copyable_window_share_scores_nothing_when_absent(self):
-        res = calculate_bankroll_optimized_score(_clean_metrics())
-        self.assertEqual(_points(res, "Copyable Window Share"), 0.0)
+    def test_copyable_window_share_is_simulation_only(self):
+        """ADR 0006: the triage engine no longer reads a window share at all.
+
+        A leaderboard profile cannot measure the share of entry signals a window
+        admits, so the parameter was moved off the triage table entirely. Its ten
+        points were redistributed proportionally; passing a value in the metrics
+        dict must not earn anything, because a stale simulation payload on a
+        leaderboard profile must never feed triage scoring (PR #22 footgun).
+        """
+        res = calculate_bankroll_optimized_score(
+            _clean_metrics(copyable_window_share=1.0)
+        )
+        self.assertNotIn("window_share", res["breakdown"])
+        self.assertNotIn("Copyable Window Share", res.get("breakdown_labels", {}).values())
+        # The redistributed weights still sum to one hundred.
+        self.assertEqual(sum(res["breakdown_points"].values()), 100)
 
     def test_drawdown_depth_scores_nothing_when_absent(self):
         res = calculate_bankroll_optimized_score(_clean_metrics())
@@ -159,7 +171,7 @@ class TestEdgeToFrictionCurve(unittest.TestCase):
 
     def test_full_marks_need_an_edge_several_times_the_friction(self):
         res = calculate_bankroll_optimized_score(_clean_metrics(edge_to_friction=3.0))
-        self.assertAlmostEqual(_points(res, "Edge-to-Friction"), 22.0, places=2)
+        self.assertAlmostEqual(_points(res, "Edge-to-Friction"), 24.0, places=2)
 
     def test_the_curve_rises_between_break_even_and_full_marks(self):
         thin = calculate_bankroll_optimized_score(_clean_metrics(edge_to_friction=1.5))
@@ -170,7 +182,7 @@ class TestEdgeToFrictionCurve(unittest.TestCase):
 class TestDrawdownDepthScoring(unittest.TestCase):
     def test_an_untouched_equity_curve_scores_full_marks(self):
         res = calculate_bankroll_optimized_score(_clean_metrics(drawdown_depth=0.0))
-        self.assertAlmostEqual(_points(res, "Drawdown Depth"), 12.0, places=2)
+        self.assertAlmostEqual(_points(res, "Drawdown Depth"), 13.0, places=2)
 
     def test_a_deep_fall_scores_nothing(self):
         res = calculate_bankroll_optimized_score(_clean_metrics(drawdown_depth=0.90))
@@ -231,7 +243,7 @@ class TestRecentFormMeasuresReturnNotAbsoluteDollars(unittest.TestCase):
         # $1,000 recent profit on $50 average investment is a 100% return over
         # the 20-trade window at zero slip.
         res = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=1000.0, avg_invest=50.0, r20_slip=0.0))
-        self.assertAlmostEqual(_points(res, "Recent Form"), 10.0, places=2)
+        self.assertAlmostEqual(_points(res, "Recent Form"), 11.0, places=2)
 
     def test_an_unknown_target_size_scores_nothing(self):
         res = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=1000.0, avg_invest=0.0))
@@ -254,7 +266,7 @@ class TestSizingFitFollowsTheCopyableWindow(unittest.TestCase):
         res = calculate_bankroll_optimized_score(
             _clean_metrics(avg_invest=CURRENT_PROFILE.sizing_fit_peak_usd)
         )
-        self.assertAlmostEqual(_points(res, "Sizing Fit"), 5.0, places=2)
+        self.assertAlmostEqual(_points(res, "Sizing Fit"), 6.0, places=2)
 
     def test_a_target_below_the_window_scores_nothing(self):
         """Below the window every copy order is bumped to the venue minimum."""
@@ -288,7 +300,7 @@ class TestRecalibratedTierBands(unittest.TestCase):
 
     def test_the_engine_assigns_the_band_the_score_earns(self):
         res = calculate_bankroll_optimized_score(
-            _clean_metrics(edge_to_friction=3.0, copyable_window_share=1.0,
+            _clean_metrics(edge_to_friction=3.0,
                            drawdown_depth=0.0, days_win_rate=95.0,
                            observed_days=14, r20_pnl=2000.0, r20_slip=0.0,
                            pl_ratio=4.0, pnl_vol_ratio=30.0, markets=250)
@@ -304,7 +316,6 @@ class TestScaleIsIntact(unittest.TestCase):
             _clean_metrics(
                 copy_pnl=5000.0,
                 edge_to_friction=3.0,
-                copyable_window_share=1.0,
                 drawdown_depth=0.0,
                 days_win_rate=95.0,
                 observed_days=14,

@@ -73,7 +73,6 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         meas = to_engine_metrics(p, profile.slippage_pct)
         raw_metrics = meas["raw_metrics"]
         sim_summary = meas["sim_summary"]
-        window_share = meas["window_share"]
         green_rate = meas["green_rate"]
         observed_days = meas["observed_days"]
         drawdown_depth = meas["drawdown_depth"]
@@ -101,7 +100,6 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
             "final_score": score,
             "grade": audit_res["grade"],
             "is_hidden_gem": is_gem,
-            "copyable_window_share": round(window_share, 4) if window_share is not None else None,
             "simulation_summary": sim_summary,
             "metrics": {
                 "polycop_site_score": raw_metrics["polycop_site_score"],

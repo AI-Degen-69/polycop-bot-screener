@@ -160,7 +160,7 @@ SCORING_SPEC = {
     "parameters": [
         {
             "name": "Edge-to-Friction Ratio",
-            "points": 22,
+            "points": 24,
             "zero": f"<= {EDGE_TO_FRICTION_BREAK_EVEN:.1f} (break-even)",
             "full": f">= {EDGE_TO_FRICTION_FULL_MARKS:.1f}",
             "note": "edge per dollar of friction; the cheapest disqualifying arithmetic runs first",
@@ -168,7 +168,7 @@ SCORING_SPEC = {
         },
         {
             "name": "Slippage Cost Rate",
-            "points": 15,
+            "points": 17,
             "zero": f">= {SLIPPAGE_COST_RATE_GATE * 100:.1f}%",
             "full": "<= 1.0%",
             "note": "modelled, before the Friction Realism Multiplier",
@@ -176,23 +176,15 @@ SCORING_SPEC = {
         },
         {
             "name": "Drawdown Depth",
-            "points": 12,
+            "points": 13,
             "zero": f">= {DRAWDOWN_DEPTH_ZERO_AT:.2f} of peak",
             "full": "0.0",
             "note": "from the lifetime equity curve",
             "radar": "Drawdown",
         },
         {
-            "name": "Copyable Window Share",
-            "points": 10,
-            "zero": "0%",
-            "full": "100%",
-            "note": "share of trades the Copyable Trade Window admits",
-            "radar": "Window Share",
-        },
-        {
             "name": "Recent Form",
-            "points": 10,
+            "points": 11,
             "zero": "PnL <= $0 or slip unmeasured",
             "full": f">= {RECENT_FORM_FULL_MARKS_RETURN * 100:.0f}% return over the recent-{RECENT_FORM_WINDOW_TRADES:.0f} window at 0% slip",
             "note": "return on deployed capital, judged against the friction it came through (ADR 0004)",
@@ -200,7 +192,7 @@ SCORING_SPEC = {
         },
         {
             "name": "Daily Green Rate",
-            "points": 8,
+            "points": 9,
             "zero": f"< 40% or fewer than {MIN_OBSERVED_DAYS:.0f} observed days",
             "full": ">= 85%",
             "note": "copy-adjusted, measured from real per-day simulated results",
@@ -208,7 +200,7 @@ SCORING_SPEC = {
         },
         {
             "name": "Profit/Loss Ratio",
-            "points": 8,
+            "points": 9,
             "zero": f"<= {PL_RATIO_GATE:.1f}",
             "full": ">= 3.0",
             "note": "",
@@ -216,7 +208,7 @@ SCORING_SPEC = {
         },
         {
             "name": "Sizing Fit",
-            "points": 5,
+            "points": 6,
             "zero": "outside the Copyable Trade Window",
             "full": "at the window midpoint",
             "note": "peak derived from the Copy Execution Profile, never hand-picked",
@@ -224,7 +216,7 @@ SCORING_SPEC = {
         },
         {
             "name": "Hedged Control",
-            "points": 5,
+            "points": 6,
             "zero": f">= {HEDGED_RATE_GATE_PCT:.1f}%",
             "full": "0%",
             "note": "",
@@ -309,7 +301,12 @@ def calculate_edge_retention(pnl_10_pct: float, pnl_2_pct: float) -> float | Non
 def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRENT_PROFILE):
     """
     PolyCop Reweighted 100-Point Triage Engine, run under one Copy Execution Profile.
-    Reallocated 11 continuous parameters (Total 100 pts).
+    Reallocated 10 continuous parameters (Total 100 pts).
+
+    Copyable Window Share is deliberately absent: it is simulation-only (ADR 0006),
+    because no leaderboard field can proxy a distributional share of entry signals.
+    Its former ten points were redistributed proportionally across the parameters
+    triage can actually measure.
 
     HARD REJECTION GATES (see SCORING_SPEC):
     1. PolyCop Site Score < 40.0 -> Low quality sanity floor.
@@ -340,12 +337,11 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     mkts = float(metrics.get("markets", 0))
     avg_inv = float(metrics.get("avg_invest", 0.0))
     polycop_site_score = float(metrics.get("polycop_site_score", 0.0))
-    # These four are measured rather than read off the leaderboard, and any of
+    # These three are measured rather than read off the leaderboard, and any of
     # them can be unavailable. None means unmeasured and scores nothing: a
     # default would hand out points the wallet never earned, which is exactly
     # how a previous version of this engine gave every candidate a free 44.
     drawdown_depth = _measured(metrics.get("drawdown_depth"))
-    window_share = _measured(metrics.get("copyable_window_share"))
     edge_to_friction = _measured(metrics.get("edge_to_friction"))
     daily_green_rate = _measured(metrics.get("days_win_rate"))
     observed_days = int(metrics.get("observed_days") or 0)
@@ -373,43 +369,38 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     if r20_pnl < 0 and actual_pnl > DIVERGENCE_LIFETIME_PNL_USD:
         rejection_reasons.append(f"Divergence Gate: Negative Recent Form (${r20_pnl:.2f}) vs strongly positive lifetime PnL (${actual_pnl:.2f})")
 
-    # --- 11 REWEIGHTED CONTINUOUS PARAMETERS (TOTAL 100 PTS) ---
+    # --- 10 REWEIGHTED CONTINUOUS PARAMETERS (TOTAL 100 PTS) ---
 
-    # 1. Edge-to-Friction Ratio (22 pts) - nothing at break-even, full marks at 3x
+    # 1. Edge-to-Friction Ratio (24 pts) - nothing at break-even, full marks at 3x
     if edge_to_friction is None or edge_to_friction <= EDGE_TO_FRICTION_BREAK_EVEN:
         etf_score = 0.0
     elif edge_to_friction >= EDGE_TO_FRICTION_FULL_MARKS:
-        etf_score = 22.0
+        etf_score = 24.0
     else:
         span = EDGE_TO_FRICTION_FULL_MARKS - EDGE_TO_FRICTION_BREAK_EVEN
-        etf_score = 22.0 * ((edge_to_friction - EDGE_TO_FRICTION_BREAK_EVEN) / span)
+        etf_score = 24.0 * ((edge_to_friction - EDGE_TO_FRICTION_BREAK_EVEN) / span)
     score += etf_score
     breakdown["edge_to_friction"] = round(etf_score, 2)
 
-    # 2. Slippage Cost Rate (15 pts)
+    # 2. Slippage Cost Rate (17 pts)
     if slip_cost_rate <= 0.01:
-        slip_score = 15.0
+        slip_score = 17.0
     elif slip_cost_rate >= SLIPPAGE_COST_RATE_GATE:
         slip_score = 0.0
     else:
-        slip_score = 15.0 * (1.0 - ((slip_cost_rate - 0.01) / (SLIPPAGE_COST_RATE_GATE - 0.01)))
+        slip_score = 17.0 * (1.0 - ((slip_cost_rate - 0.01) / (SLIPPAGE_COST_RATE_GATE - 0.01)))
     score += slip_score
     breakdown["slippage_cost_rate"] = round(slip_score, 2)
 
-    # 3. Drawdown Depth (12 pts)
+    # 3. Drawdown Depth (13 pts)
     if drawdown_depth is None:
         dd_score = 0.0
     else:
-        dd_score = max(0.0, 12.0 * (1.0 - min(1.0, drawdown_depth / DRAWDOWN_DEPTH_ZERO_AT)))
+        dd_score = max(0.0, 13.0 * (1.0 - min(1.0, drawdown_depth / DRAWDOWN_DEPTH_ZERO_AT)))
     score += dd_score
     breakdown["drawdown_depth"] = round(dd_score, 2)
 
-    # 4. Copyable Window Share (10 pts)
-    cws_score = 0.0 if window_share is None else min(10.0, max(0.0, window_share * 10.0))
-    score += cws_score
-    breakdown["window_share"] = round(cws_score, 2)
-
-    # 5. Recent Form (10 pts) - recent return judged against the friction it came through
+    # 4. Recent Form (11 pts) - recent return judged against the friction it came through
     if r20_pnl <= 0 or r20_slip is None or avg_inv <= 0:
         rf_score = 0.0
     else:
@@ -417,31 +408,31 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
                              / RECENT_FORM_SLIP_CEILING_PCT)
         recent_return = r20_pnl / (RECENT_FORM_WINDOW_TRADES * avg_inv)
         return_factor = min(recent_return / RECENT_FORM_FULL_MARKS_RETURN, 1.0)
-        rf_score = 10.0 * slip_factor * return_factor
+        rf_score = 11.0 * slip_factor * return_factor
     score += rf_score
     breakdown["recent_form"] = round(rf_score, 2)
 
-    # 6. Daily Green Rate (8 pts) - a rate drawn from too few days is a streak
+    # 5. Daily Green Rate (9 pts) - a rate drawn from too few days is a streak
     if daily_green_rate is None or observed_days < MIN_OBSERVED_DAYS or daily_green_rate <= 40.0:
         days_score = 0.0
     elif daily_green_rate >= 85.0:
-        days_score = 8.0
+        days_score = 9.0
     else:
-        days_score = 8.0 * ((daily_green_rate - 40.0) / (85.0 - 40.0))
+        days_score = 9.0 * ((daily_green_rate - 40.0) / (85.0 - 40.0))
     score += days_score
     breakdown["daily_green_rate"] = round(days_score, 2)
 
-    # 7. Profit/Loss Ratio (8 pts)
+    # 6. Profit/Loss Ratio (9 pts)
     if pl_ratio <= PL_RATIO_GATE:
         pl_score = 0.0
     elif pl_ratio >= 3.0:
-        pl_score = 8.0
+        pl_score = 9.0
     else:
-        pl_score = 8.0 * ((pl_ratio - PL_RATIO_GATE) / (3.0 - PL_RATIO_GATE))
+        pl_score = 9.0 * ((pl_ratio - PL_RATIO_GATE) / (3.0 - PL_RATIO_GATE))
     score += pl_score
     breakdown["pl_ratio"] = round(pl_score, 2)
 
-    # 8. Sizing Fit (5 pts) - full marks at the window midpoint, nothing outside it
+    # 7. Sizing Fit (6 pts) - full marks at the window midpoint, nothing outside it
     #
     # Outside the Copyable Trade Window the realised copy ratio stops matching the
     # nominal one: below it the venue minimum bumps the order up, above it the
@@ -453,21 +444,21 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     if avg_inv <= window_low or avg_inv >= window_high:
         inv_score = 0.0
     elif avg_inv <= sizing_peak:
-        inv_score = 5.0 * ((avg_inv - window_low) / (sizing_peak - window_low))
+        inv_score = 6.0 * ((avg_inv - window_low) / (sizing_peak - window_low))
     else:
-        inv_score = 5.0 * ((window_high - avg_inv) / (window_high - sizing_peak))
+        inv_score = 6.0 * ((window_high - avg_inv) / (window_high - sizing_peak))
     score += inv_score
     breakdown["sizing_fit"] = round(inv_score, 2)
 
-    # 9. Hedged Control (5 pts)
+    # 8. Hedged Control (6 pts)
     if hedged > HEDGED_RATE_GATE_PCT:
         hedged_score = 0.0
     else:
-        hedged_score = 5.0 * (1.0 - (hedged / HEDGED_RATE_GATE_PCT))
+        hedged_score = 6.0 * (1.0 - (hedged / HEDGED_RATE_GATE_PCT))
     score += hedged_score
     breakdown["hedged_control"] = round(hedged_score, 2)
 
-    # 10. Markets Sample (3 pts)
+    # 9. Markets Sample (3 pts)
     if mkts < MARKETS_GATE:
         mkt_score = 0.0
     elif mkts >= 200:
@@ -477,7 +468,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     score += mkt_score
     breakdown["markets_sample"] = round(mkt_score, 2)
 
-    # 11. Capital Efficiency (2 pts)
+    # 10. Capital Efficiency (2 pts)
     pv_clamped = min(max(pnl_vol, 0.0), 30.0)
     pv_score = 2.0 * (pv_clamped / 30.0)
     score += pv_score
@@ -503,7 +494,6 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
                 "Edge-to-Friction Ratio": "edge_to_friction",
                 "Slippage Cost Rate": "slippage_cost_rate",
                 "Drawdown Depth": "drawdown_depth",
-                "Copyable Window Share": "window_share",
                 "Recent Form": "recent_form",
                 "Daily Green Rate": "daily_green_rate",
                 "Profit/Loss Ratio": "pl_ratio",
