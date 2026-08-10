@@ -4,14 +4,8 @@ import time
 import os
 import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# SCRIPT_DIR is app/src/pipeline -> APP_DIR is app/
-APP_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-SRC_DIR = os.path.join(APP_DIR, "src")
-DATA_DIR = os.path.join(APP_DIR, "data")
-
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from paths import DATA_DIR, PHASE1_FILE, PHASE2_FILE
 
 from execution.copy_execution_profile import CURRENT_PROFILE
 from pipeline.leaderboard_adapter import to_engine_metrics
@@ -36,8 +30,8 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
     phase can be exercised against a fixture, which is the only way to catch a
     parameter that scores well because nothing ever measured it.
     """
-    in_file = in_file or os.path.join(DATA_DIR, "phase1_scraped_wallets.json")
-    out_file = out_file or os.path.join(DATA_DIR, "phase2_verified_targets.json")
+    in_file = in_file or os.path.join(DATA_DIR, PHASE1_FILE)
+    out_file = out_file or os.path.join(DATA_DIR, PHASE2_FILE)
 
     if not os.path.exists(in_file):
         print(f"Error: Phase 1 file {in_file} not found. Run phase1_scrape_leaderboard.py first.")

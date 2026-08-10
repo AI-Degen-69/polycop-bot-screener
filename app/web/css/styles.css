@@ -1294,6 +1294,53 @@ header {
     color: #94a3b8;
 }
 
+/* --- Position Cap Backtest summary: wallets that would upgrade tier --- */
+.provenance-capsweep {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.25);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: #9ca3af;
+}
+
+.provenance-capsweep-label {
+    font-weight: 600;
+    color: #e5e7eb;
+}
+
+.capsweep-chip {
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.74rem;
+    font-weight: 700;
+    cursor: help;
+    transition: all 0.2s ease;
+}
+
+.capsweep-chip:hover {
+    background: rgba(16, 185, 129, 0.22);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+
+.capsweep-chip.is-zero {
+    background: rgba(148, 163, 184, 0.08);
+    border-color: rgba(148, 163, 184, 0.3);
+    color: #94a3b8;
+}
+
+.provenance-capsweep-note {
+    color: #6b7280;
+    font-size: 0.76rem;
+}
+
 /* Distinguished from a real verdict by weight and colour, not only by wording. */
 .tier-unsimulated {
     color: #94a3b8;
@@ -1366,4 +1413,168 @@ header {
     font-weight: 400;
     white-space: normal;
     overflow-wrap: anywhere;
+}
+
+/* --- Position Cap Backtest: the per-cap sweep rows in the detail modal --- */
+.cs-head {
+    display: grid;
+    grid-template-columns: 44px 72px 1fr 82px 40px;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px 6px;
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.cs-row {
+    display: grid;
+    grid-template-columns: 44px 72px 1fr 82px 40px;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.78rem;
+}
+
+.cs-row:last-of-type {
+    border-bottom: none;
+}
+
+.cs-cap {
+    font-family: var(--mono-font, "Space Mono", monospace);
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.cs-window {
+    font-family: var(--mono-font, "Space Mono", monospace);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.cs-pnl {
+    font-family: var(--mono-font, "Space Mono", monospace);
+    color: var(--tier-s);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.cs-ret {
+    color: var(--text-muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.cs-tier {
+    font-weight: 700;
+    text-align: center;
+}
+
+/* Custom-caps control: input + run button + status, inside the cap card */
+.cs-badge {
+    display: inline-block;
+    margin-bottom: 0.4rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(6, 182, 212, 0.12);
+    border: 1px solid rgba(6, 182, 212, 0.45);
+    color: var(--accent-cyan);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.cs-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.25);
+}
+
+.cs-input {
+    flex: 1 1 120px;
+    min-width: 0;
+    background: var(--bg-card-hover);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.78rem;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.cs-input:focus {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+}
+
+.cs-btn {
+    background: rgba(6, 182, 212, 0.12);
+    border: 1px solid rgba(6, 182, 212, 0.5);
+    color: var(--accent-cyan);
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.76rem;
+    font-weight: 700;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.cs-btn:hover:not(:disabled) {
+    background: rgba(6, 182, 212, 0.25);
+    box-shadow: 0 0 12px rgba(6, 182, 212, 0.3);
+}
+
+.cs-btn:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.cs-btn-reset {
+    background: rgba(148, 163, 184, 0.1);
+    border-color: rgba(148, 163, 184, 0.35);
+    color: #9ca3af;
+}
+
+.cs-btn-reset:hover:not(:disabled) {
+    background: rgba(148, 163, 184, 0.2);
+    color: #e5e7eb;
+}
+
+#csStatus {
+    margin-top: 0.35rem;
+    font-size: 0.76rem;
+}
+
+#csStatus.cs-error {
+    color: #f87171;
+    font-style: italic;
+}
+
+/* Tier-move indicators on the custom-caps comparison rows */
+.cs-delta {
+    margin-left: 3px;
+    font-size: 0.66rem;
+    vertical-align: middle;
+    cursor: help;
+}
+
+.cs-delta-up {
+    color: var(--tier-s);
+    text-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.cs-delta-down {
+    color: var(--tier-c);
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
 }

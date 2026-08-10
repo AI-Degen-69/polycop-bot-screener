@@ -52,6 +52,11 @@ producing the feed the page reads. One wallet being scored is not a scan; a scan
 pass. A repeated scan is a rescan.
 _Avoid_: run, audit run, pipeline run
 
+**Feed**:
+The versioned payload the page reads to render a scan: a compact server-side projection of the
+raw scan file, not the file itself (see the feed-projection ADR). The raw file stays the audit record; the page
+only ever reads the projection, whose shape is a versioned contract.
+
 ### Execution
 
 **Bankroll**:
@@ -158,3 +163,9 @@ assumption to the observed one. The headline ranking measure.
 A target trade the simulation could not follow because the bankroll was fully deployed. Direct
 evidence of capital exhaustion at a given account size.
 _Avoid_: missed trade, skip
+
+**Simulated Verdict**:
+The interpretation of a Slippage Sensitivity Sweep's outcome for one wallet: the tier, the
+verdict-side metrics and the per-cap backtest a reader is shown. It is where an endpoint failure
+is distinguished from a measured rejection.
+_Avoid_: result, outcome, sweep output

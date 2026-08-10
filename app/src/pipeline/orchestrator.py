@@ -9,13 +9,10 @@ lives in one place rather than being duplicated across screen.py and the web
 handler. Adding a phase now touches one call site, not two.
 """
 import os
-import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
+# A library module: the caller has already made app/src importable, so this
+# reaches the inventory through the one paths module.
+from paths import DATA_DIR, PHASE3_FILE  # noqa: E402
 from pipeline.phase1_scrape_leaderboard import fetch_and_scrape_leaderboard  # noqa: E402
 from pipeline.phase2_filter_targets import run_phase2_filter  # noqa: E402
 from pipeline.phase3_simulation_rank import run_phase3_simulation_rank  # noqa: E402
@@ -27,6 +24,5 @@ def run_pipeline():
     fetch_and_scrape_leaderboard()
     run_phase2_filter()
     run_phase3_simulation_rank()
-    DATA_DIR = os.path.join(os.path.dirname(SRC_DIR), "data")
-    phase3_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+    phase3_file = os.path.join(DATA_DIR, PHASE3_FILE)
     return phase3_file

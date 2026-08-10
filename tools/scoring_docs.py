@@ -29,10 +29,10 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+# Running `python tools/scoring_docs.py` puts tools/ on sys.path; the header
+# line below makes app/src reachable so `paths` can supply the layout.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
+from paths import PROJECT_ROOT  # noqa: E402
 
 from screener.score_wallets import (  # noqa: E402
     GEM_SITE_SCORE_MAX,
@@ -53,7 +53,6 @@ DOCS = [
 
 CONTEXT_MD = os.path.join(PROJECT_ROOT, "CONTEXT.md")
 
-WEB_DIR = os.path.join(PROJECT_ROOT, "app", "web")
 
 
 def _tier_min(label_prefix: str) -> float:

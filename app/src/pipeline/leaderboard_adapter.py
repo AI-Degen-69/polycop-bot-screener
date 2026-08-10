@@ -15,12 +15,6 @@ import os
 import sys
 from typing import Any, Dict, Optional
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# SCRIPT_DIR is app/src/pipeline -> SRC_DIR is app/src
-SRC_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
 from screener.derived_metrics import (  # noqa: E402
     calculate_daily_green_rate,
     calculate_drawdown_depth,

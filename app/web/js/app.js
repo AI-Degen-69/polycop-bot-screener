@@ -71,7 +71,16 @@ document.addEventListener("DOMContentLoaded", () => {
 // Everything on the page comes precomputed from the pipeline. The browser does
 // no scoring: a second engine here could disagree with the first, and when two
 // numbers disagree the one on screen is the one that gets acted on.
-const FEED_URL = "/data/phase3_simulated_targets.json";
+//
+// The feed is the server's compact v1 projection, not the raw scan file: the
+// raw file is ~6 MB and 92% of it is a skip log the page shows 12 rows of.
+// The projection caps those lists and carries the true totals alongside, so
+// the "…and N more" lines below stay honest.
+//
+// The cap of 12 below must stay equal to MODAL_LIST_CAP in
+// app/src/server/feed_projection.py — the server caps the lists, the page
+// renders the cap.
+const FEED_URL = "/api/feed/v1";
 
 function normaliseTarget(row) {
     // The rest of the page was written against the triage feed's field names.
@@ -80,6 +89,44 @@ function normaliseTarget(row) {
         final_score: row.triage_copyability_score ?? 0,
         grade: row.triage_grade || "Ungraded"
     });
+}
+
+function renderCapSweepSummary(data) {
+    // How many backtested wallets would upgrade tier at each wider per-position
+    // cap. The pipeline counts the upgrades against each wallet's headline
+    // tier, so the browser only renders the counts — no second engine.
+    const upgrades = data.cap_sweep_upgrades || [];
+    const backtested = data.cap_sweep_backtested || 0;
+    // With nothing backtested there is no answer to show. With backtests but
+    // zero upgrades, the zero chips below are the answer — it must not be
+    // hidden just because no wallet changed tier.
+    if (backtested === 0) return "";
+
+    const profile = data.copy_execution_profile || {};
+    // The pipeline states the baseline cap it compared against, so the label
+    // matches the measurement even when the binding cap differs from the
+    // stated per-token field.
+    const baseline = data.cap_sweep_baseline_cap !== undefined
+        ? `$${Number(data.cap_sweep_baseline_cap).toFixed(0)}`
+        : (profile.per_token_cap_usd !== undefined
+            ? `$${Number(profile.per_token_cap_usd).toFixed(0)}`
+            : "the current cap");
+    const chips = upgrades.map(u => {
+        const n = Number(u.upgrades);
+        const cls = n > 0 ? "capsweep-chip" : "capsweep-chip is-zero";
+        const label = n > 0 ? `+${n}` : "0";
+        const tip = `${n} of ${backtested} backtested wallet${backtested === 1 ? "" : "s"} earn a better tier at a $${Number(u.cap_usd).toFixed(0)} cap`;
+        return `<span class="${cls}" title="${tip}">${label} @ $${Number(u.cap_usd).toFixed(0)}</span>`;
+    }).join(" ");
+
+    return `
+        <div class="provenance-capsweep"
+             title="A wallet upgrades when the tier its backtest earns at a wider per-position cap outranks its headline tier.">
+            <span class="provenance-capsweep-label">💸 Position Cap Backtest</span>
+            ${chips}
+            <span class="provenance-capsweep-note">of ${backtested} backtested, vs the ${baseline} cap</span>
+        </div>
+    `;
 }
 
 function renderProvenanceBanner(data) {
@@ -91,6 +138,7 @@ function renderProvenanceBanner(data) {
     const bankroll = profile.bankroll_usd !== undefined ? `$${profile.bankroll_usd}` : "—";
     const slippage = profile.slippage_pct !== undefined ? `${profile.slippage_pct}%` : "—";
     const fingerprint = profile.fingerprint ? profile.fingerprint.slice(0, 12) : "unknown";
+    const capSweepLine = renderCapSweepSummary(data);
 
     const profileLine = `
         <div class="provenance-profile">
@@ -122,12 +170,14 @@ function renderProvenanceBanner(data) {
             <div class="provenance-headline">${headline}</div>
             <div class="provenance-detail">${detail}</div>
             ${profileLine}
+            ${capSweepLine}
         `;
     } else {
         banner.className = "provenance-banner";
         banner.innerHTML = `
             <div class="provenance-headline">Ranked by simulated performance on your bankroll</div>
             ${profileLine}
+            ${capSweepLine}
         `;
     }
     banner.hidden = false;
@@ -139,6 +189,14 @@ async function loadDataset() {
         if (!resp.ok) throw new Error("Dataset file not found");
         const data = await resp.json();
         allTargets = (data.simulated_targets || []).map(normaliseTarget);
+        // The scan's cap levels feed the modal control's default, so the
+        // control always reflects what the scan actually ran.
+        if (data.cap_sweep_levels && data.cap_sweep_levels.length > 0) {
+            scanCapLevels = data.cap_sweep_levels;
+        }
+        if (data.cap_sweep_baseline_cap !== undefined) {
+            capSweepBaselineCap = data.cap_sweep_baseline_cap;
+        }
         renderProvenanceBanner(data);
         updateSummaryHeader(data);
         filterAndRender();
@@ -509,9 +567,12 @@ function renderBalanceMiss(target) {
     }
 
     // The pipeline already dropped the markets that funded everything, so every
-    // entry here is a miss and an empty list means the bankroll held.
+    // entry here is a miss and an empty list means the bankroll held. The feed
+    // caps this list at 12 and carries the true total alongside, so the count
+    // and the "…and N more" line use the total, never the cap.
     const missed = target.balance_miss_details || [];
-    if (missed.length === 0) {
+    const missedTotal = target.balance_miss_total ?? missed.length;
+    if (missedTotal === 0) {
         host.innerHTML = `<div class="bm-ok">✅ Every copyable trade was funded — the bankroll never ran dry.</div>`;
         return;
     }
@@ -524,9 +585,9 @@ function renderBalanceMiss(target) {
     `).join("");
 
     host.innerHTML = `
-        <div class="bm-headline">⚠️ ${missed.length} trade${missed.length === 1 ? "" : "s"} missed for lack of balance</div>
+        <div class="bm-headline">⚠️ ${missedTotal} trade${missedTotal === 1 ? "" : "s"} missed for lack of balance</div>
         ${rows}
-        ${missed.length > 12 ? `<div class="bm-empty">…and ${missed.length - 12} more.</div>` : ""}
+        ${missedTotal > 12 ? `<div class="bm-empty">…and ${missedTotal - 12} more.</div>` : ""}
     `;
 }
 
@@ -543,8 +604,11 @@ function renderSkipReasons(target) {
         return;
     }
 
+    // The feed caps this list at 12 and carries the true total alongside, so
+    // the count and the "…and N more" line use the total, never the cap.
     const reasons = target.skip_reasons || [];
-    if (reasons.length === 0) {
+    const reasonsTotal = target.skip_reasons_total ?? reasons.length;
+    if (reasonsTotal === 0) {
         host.innerHTML = `<div class="bm-ok">✅ Every entry signal was copied — nothing was skipped.</div>`;
         return;
     }
@@ -558,10 +622,271 @@ function renderSkipReasons(target) {
     `).join("");
 
     host.innerHTML = `
-        <div class="bm-headline">⚠️ ${reasons.length} signal${reasons.length === 1 ? "" : "s"} did not become a copy</div>
+        <div class="bm-headline">⚠️ ${reasonsTotal} signal${reasonsTotal === 1 ? "" : "s"} did not become a copy</div>
         ${rows}
-        ${reasons.length > 12 ? `<div class="bm-empty">…and ${reasons.length - 12} more.</div>` : ""}
+        ${reasonsTotal > 12 ? `<div class="bm-empty">…and ${reasonsTotal - 12} more.</div>` : ""}
     `;
+}
+
+// --- Position Cap Backtest card: canned scan levels + custom-caps control ---
+// The card's row markup is shared by the canned view (levels the scan
+// published) and the custom view (levels the control just backtested live),
+// so the two can never render the same number differently.
+
+// The scan's cap levels and baseline come from the feed, so the control's
+// default matches what the scan actually ran, whatever they are.
+let scanCapLevels = [5, 10, 15, 20];
+let capSweepBaselineCap = 5;
+
+// The last successful custom-caps run is remembered across reloads so the
+// control pre-fills with it next visit. Storage can be unavailable (private
+// mode, disabled), so every access is guarded — the control just forgets.
+const CAP_CAPS_STORAGE_KEY = "polycopCapBacktestCaps";
+
+function loadSavedCustomCaps() {
+    try {
+        const raw = localStorage.getItem(CAP_CAPS_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = parseCapsInput(raw);
+        if (parsed.caps) return parsed.caps.join(", ");
+        // A stored value that no longer parses is pruned rather than left to
+        // fail silently on every visit.
+        localStorage.removeItem(CAP_CAPS_STORAGE_KEY);
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function saveCustomCaps(caps) {
+    try {
+        localStorage.setItem(CAP_CAPS_STORAGE_KEY, caps.join(", "));
+    } catch (e) {
+        /* storage unavailable; the control just won't remember */
+    }
+}
+
+function clearSavedCustomCaps() {
+    try {
+        localStorage.removeItem(CAP_CAPS_STORAGE_KEY);
+    } catch (e) {
+        /* ignore */
+    }
+}
+
+function capSweepTierColor(tier) {
+    // The app's own tier palette, not a second copy of the band logic: the
+    // letter is already the pipeline's verdict; this only colours it.
+    const letter = (tier || "F").split(" ")[0];
+    if (letter.startsWith("S")) return "var(--tier-s)";
+    if (letter.startsWith("A")) return "var(--tier-a)";
+    if (letter.startsWith("B")) return "var(--tier-b)";
+    return "var(--tier-c)";
+}
+
+function capSweepFmtPnl(v) {
+    return (v === null || v === undefined) ? "—" : "$" + Number(v).toLocaleString("en-US", {maximumFractionDigits: 0});
+}
+
+function capSweepFmtRet(v) {
+    return (v === null || v === undefined) ? "—" : (v * 100).toFixed(0) + "%";
+}
+
+// Display-only ordering of the pipeline's tier letters, used solely to colour
+// the ▲/▼ move indicator in the custom-caps comparison. The letters are the
+// pipeline's verdicts; this map never produces a verdict of its own.
+const CAP_SWEEP_TIER_ORDER = { S: 5, A: 4, B: 3, C: 2, F: 1 };
+
+function capSweepTierRank(tier) {
+    if (!tier) return 0;
+    return CAP_SWEEP_TIER_ORDER[tier.split(" ")[0][0]] || 0;
+}
+
+function capSweepRowsHtml(sweep, deltaHtmlFor) {
+    // `deltaHtmlFor(s, i)` is optional: the canned view passes none (its rows
+    // are the scan's published levels, shown as-is), the custom view passes a
+    // per-level ▲/▼ decorator for the comparison.
+    return sweep.map((s, i) => {
+        const deltaHtml = deltaHtmlFor ? deltaHtmlFor(s, i) : "";
+        return `
+        <div class="cs-row">
+            <span class="cs-cap">$${Number(s.cap_usd).toFixed(0)}</span>
+            <span class="cs-window">≤ $${Number(s.window_max_usd).toFixed(0)}</span>
+            <span class="cs-pnl">${s.is_rejected ? "—" : capSweepFmtPnl(s.simulated_copy_pnl_10)}</span>
+            <span class="cs-ret">${s.is_rejected ? "rejected" : capSweepFmtRet(s.edge_retention)}</span>
+            <span class="cs-tier" style="color:${capSweepTierColor(s.tier)}">${s.tier ? s.tier.split(" ")[0] : "F"}${deltaHtml}</span>
+        </div>
+    `;
+    }).join("");
+}
+
+function capSweepControlHtml(resetVisible, defaultCaps) {
+    // The input default is feed-derived, so it is escaped before reaching the
+    // attribute the same way every other feed-derived string is.
+    return `
+        <div class="cs-control">
+            <input id="csCustomCapsInput" class="cs-input" value="${escapeHtml(String(defaultCaps))}"
+                   placeholder="e.g. 8, 20, 30" aria-label="Custom cap levels in dollars"
+                   onkeydown="if (event.key === 'Enter') { rerunCapBacktest(); }" />
+            <button class="cs-btn" onclick="rerunCapBacktest()" id="csRunBtn">⚡ Rerun at caps</button>
+            <button class="cs-btn cs-btn-reset" onclick="resetCapBacktest()" id="csResetBtn" ${resetVisible ? "" : "hidden"}>↺ Scan caps</button>
+        </div>
+        <div id="csStatus" class="bm-empty" role="status"></div>
+    `;
+}
+
+function renderCapSweep(target) {
+    // The per-position cap backtest: the same wallet replayed under rising
+    // caps ($5 / $10 / $15 / $20), so a reader sees how the verdict would
+    // have moved if the position cap were wider. The card's headline tier
+    // stays the $5 verdict; this shows the sensitivity.
+    const host = document.getElementById("modalCapSweep");
+    if (!host) return;
+
+    if (target.verdict_source !== "simulation") {
+        host.innerHTML = `<div class="bm-empty">No Simulated Copy Run, so no cap backtest exists.</div>`;
+        return;
+    }
+
+    const sweep = target.cap_sweep || [];
+    if (sweep.length === 0) {
+        host.innerHTML = `<div class="bm-empty">No cap backtest was published for this wallet.</div>`;
+        return;
+    }
+    if (sweep[0].error) {
+        host.innerHTML = `<div class="bm-empty">Cap backtest unavailable: ${escapeHtml(sweep[0].error)}</div>`;
+        return;
+    }
+
+    // The control's default is the remembered custom caps when there are
+    // any; otherwise the scan's own wider levels, so a click without editing
+    // re-runs what the scan already published.
+    const defaultCaps = loadSavedCustomCaps() || (scanCapLevels
+        .filter(c => Number(c) !== Number(capSweepBaselineCap))
+        .join(", ") || "10, 15, 20");
+
+    host.innerHTML = `
+        <div class="cs-head">
+            <span>Cap</span><span>Window</span><span>PnL @10%</span><span>Retention</span><span>Tier</span>
+        </div>
+        <div id="csRows">${capSweepRowsHtml(sweep)}</div>
+        ${capSweepControlHtml(false, defaultCaps)}
+        <div class="bm-empty" style="margin-top:6px">The headline tier is the $${Number(capSweepBaselineCap).toFixed(0)} verdict; a wider cap is the backtested alternative. Enter comma-separated caps to backtest this wallet live — the scan profile is not changed.</div>
+    `;
+}
+
+function renderCapSweepCustom(levels, caps) {
+    // The result of a live custom-caps run: the same rows, stamped as custom
+    // so a reader can tell it from the scan's published levels. Each level's
+    // tier is compared against the headline verdict (the $5 cap): ▲ means the
+    // wallet would earn a strictly better tier at that cap, ▼ strictly worse.
+    // The comparison anchor is the headline because custom caps rarely match
+    // the scan's levels — a level-to-level pairing would mostly compare
+    // nothing.
+    const host = document.getElementById("modalCapSweep");
+    if (!host || !levels || levels.length === 0) return;
+
+    const target = filteredTargets[currentModalIndex];
+    const headlineTier = (target && target.verdict_source === "simulation") ? target.tier : null;
+    const headlineRank = headlineTier ? capSweepTierRank(headlineTier) : 0;
+    const baselineLabel = `$${Number(capSweepBaselineCap).toFixed(0)}`;
+
+    // Deltas are precomputed before the rows are rendered so the badge count
+    // and the row arrows read the same pass.
+    const deltas = levels.map(s => {
+        const rank = capSweepTierRank(s.tier);
+        if (headlineRank === 0 || rank === 0 || rank === headlineRank) return null;
+        return rank > headlineRank ? "up" : "down";
+    });
+    const ups = deltas.filter(d => d === "up").length;
+    const downs = deltas.filter(d => d === "down").length;
+    const moveSummary = (ups === 0 && downs === 0)
+        ? "no tier moves"
+        : [ups ? `${ups} ▲ upgraded` : "", downs ? `${downs} ▼ downgraded` : ""].filter(Boolean).join(" · ");
+
+    const deltaHtmlFor = (s, i) => {
+        const delta = deltas[i];
+        if (!delta) return "";
+        const letter = (s.tier || "F").split(" ")[0];
+        const headlineLetter = (headlineTier || "").split(" ")[0] || "?";
+        const verb = delta === "up" ? "Upgrade" : "Downgrade";
+        return ` <span class="cs-delta cs-delta-${delta}" title="${verb} vs the ${baselineLabel} verdict: ${headlineLetter} → ${letter}">${delta === "up" ? "▲" : "▼"}</span>`;
+    };
+
+    host.innerHTML = `
+        <div class="cs-badge">Live backtest · ${moveSummary}</div>
+        <div class="cs-head">
+            <span>Cap</span><span>Window</span><span>PnL @10%</span><span>Retention</span><span>Tier</span>
+        </div>
+        <div id="csRows">${capSweepRowsHtml(levels, deltaHtmlFor)}</div>
+        ${capSweepControlHtml(true, caps.join(", "))}
+        <div class="bm-empty" style="margin-top:6px">Live backtest at custom caps — the scan profile defaults were not changed. ▲/▼ compare each level against the ${baselineLabel} headline verdict.</div>
+    `;
+}
+
+function parseCapsInput(raw) {
+    const parts = String(raw).split(",").map(p => p.trim()).filter(Boolean);
+    if (parts.length === 0) return { error: "Enter at least one cap, e.g. 8, 20, 30." };
+    const caps = [];
+    for (const p of parts) {
+        const v = Number(p);
+        if (!Number.isFinite(v) || v <= 0) return { error: `"${p}" is not a positive dollar amount.` };
+        caps.push(v);
+    }
+    // Mirrors the server's MAX_CUSTOM_CAP_LEVELS; the server is the enforcer,
+    // this only catches the obvious typo before a fetch.
+    if (caps.length > 6) return { error: "At most 6 caps per run." };
+    return { caps: [...new Set(caps)].sort((a, b) => a - b) };
+}
+
+async function rerunCapBacktest() {
+    // Backtest the wallet in the modal at the caps typed into the control.
+    // The endpoint derives a profile per cap, so CURRENT_PROFILE — and every
+    // verdict already on the page — is untouched.
+    const input = document.getElementById("csCustomCapsInput");
+    const btn = document.getElementById("csRunBtn");
+    const status = document.getElementById("csStatus");
+    if (!input || !btn || !status) return;
+
+    const parsed = parseCapsInput(input.value);
+    if (parsed.error) {
+        status.classList.add("cs-error");
+        status.textContent = parsed.error;
+        return;
+    }
+    const caps = parsed.caps;
+    const wallet = currentModalAddr;
+    if (!wallet) return;
+
+    btn.disabled = true;
+    status.classList.remove("cs-error");
+    status.textContent = `Running live backtest at $${caps.join(", $")}… (uncached caps simulate against the CLOB; may take a minute)`;
+
+    try {
+        const resp = await fetch(`/api/cap_backtest?wallet=${encodeURIComponent(wallet)}&caps=${encodeURIComponent(caps.join(","))}&t=${Date.now()}`);
+        const data = await resp.json();
+        if (!resp.ok || data.error) throw new Error(data.error || ("HTTP " + resp.status));
+        if (wallet !== currentModalAddr) return; // the modal moved on; drop the stale result
+        saveCustomCaps(caps);
+        renderCapSweepCustom(data.levels, caps);
+        status.textContent = "";
+    } catch (err) {
+        if (wallet === currentModalAddr) {
+            status.classList.add("cs-error");
+            status.textContent = "Backtest failed: " + err.message;
+        }
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function resetCapBacktest() {
+    // Back to the scan's published levels for this wallet. Choosing the scan
+    // caps also forgets the remembered custom caps, so the next visit starts
+    // at the scan defaults again.
+    clearSavedCustomCaps();
+    const target = filteredTargets[currentModalIndex];
+    if (target) renderCapSweep(target);
 }
 
 function openModal(idx) {
@@ -588,6 +913,7 @@ function openModal(idx) {
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
     renderBalanceMiss(target);
     renderSkipReasons(target);
+    renderCapSweep(target);
     document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
     
     // Set correct external profile & platform links
@@ -774,6 +1100,8 @@ async function clearScanData() {
 
 window.startLeaderboardScan = startLeaderboardScan;
 window.clearScanData = clearScanData;
+window.rerunCapBacktest = rerunCapBacktest;
+window.resetCapBacktest = resetCapBacktest;
 
 // ==========================================================================
 // TAB NAVIGATION & LATENCY PROFILER PAGE INTERACTIVITY

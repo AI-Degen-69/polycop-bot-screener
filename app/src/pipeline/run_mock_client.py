@@ -4,24 +4,28 @@ import sys
 import time
 from typing import Dict, Any, Optional
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# SCRIPT_DIR is app/src/pipeline -> SRC_DIR is app/src
-SRC_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
-from execution.copy_execution_profile import CURRENT_PROFILE
+from execution.copy_execution_profile import CURRENT_PROFILE, CopyExecutionProfile
 
 def build_run_mock_payload(
     wallet: str,
     copy_pct: float = 3.0,
     slippage: float = 10.0,
     capital: float = 100.0,
-    limit: int = 4000
+    limit: int = 4000,
+    profile: Optional[CopyExecutionProfile] = None
 ) -> Dict[str, Any]:
     """
     Build payload for POST /api/run_mock endpoint per Spike 0001 specification.
+
+    The window and cap fields are derived from the Copy Execution Profile, so
+    the simulation always tests the same execution settings the score was
+    computed under. They were literals here (33 / 167 / 5) and could drift
+    from the profile — which is exactly what would have made a widened-cap
+    backtest a fiction: the endpoint would keep simulating a $5 position
+    however wide the profile claimed the window was.
     """
+    if profile is None:
+        profile = CURRENT_PROFILE
     return {
         "wallet": wallet,
         "fetch_mode": "limit",
@@ -31,12 +35,12 @@ def build_run_mock_payload(
         "copy_pct": copy_pct,
         "slippage": slippage,
         "capital": capital,
-        "target_max_price": 0.95,
-        "target_min_price": 0.05,
-        "target_max_usd": 167,
-        "target_min_usd": 33,
-        "sim_max_per_token": 5,
-        "sim_max_global": 100,
+        "target_max_price": profile.max_price,
+        "target_min_price": profile.min_price,
+        "target_max_usd": int(round(profile.window_max_usd)),
+        "target_min_usd": int(round(profile.window_min_usd)),
+        "sim_max_per_token": int(round(profile.max_single_position_usd)),
+        "sim_max_global": int(round(profile.global_cap_usd)),
         "allowed_categories": [],
         "exclude_words": [],
         "blacklist": [],
@@ -80,7 +84,8 @@ def fetch_simulated_copy_run(
         wallet=wallet_clean,
         copy_pct=profile.copy_ratio * 100.0,
         slippage=slippage,
-        capital=profile.bankroll_usd
+        capital=profile.bankroll_usd,
+        profile=profile
     )
 
     if fetcher is None:

@@ -18,11 +18,10 @@ import threading
 import unittest
 import urllib.request
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for _entry in (os.path.join(PROJECT_ROOT, "tools"),
-               os.path.join(PROJECT_ROOT, "app", "src")):
-    if _entry not in sys.path:
-        sys.path.insert(0, _entry)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
+# Importing paths also puts tools/ on sys.path, which `import scoring_docs`
+# below needs; the import is for that side effect, not for the name.
+import paths  # noqa: E402
 
 import scoring_docs  # noqa: E402
 from server.serve_web_app import PolyCopScreenerWebHandler  # noqa: E402

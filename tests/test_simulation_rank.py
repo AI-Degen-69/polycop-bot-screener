@@ -3,15 +3,17 @@ import sys
 
 import pytest
 
-SCRIPT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app", "src"))
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
 
 from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
 from pipeline.phase3_simulation_rank import (  # noqa: E402
     DATA_DIR,
-    assign_simulated_tier,
+    PHASE3_FILE,
     run_phase3_simulation_rank,
+)
+from screener.simulated_verdict import (  # noqa: E402
+    assign_simulated_tier,
+    backtest_wallet_at_caps,
 )
 from screener.score_wallets import (  # noqa: E402
     SIM_TIER_A_MIN,
@@ -336,6 +338,16 @@ def test_a_sustained_failure_streak_degrades_but_keeps_prior_verdicts():
     assert [t["address"] for t in out["simulated_targets"]] == ["0x1111", "0x2222", "0x4444"]
     assert [t["verdict_source"] for t in out["simulated_targets"]] == ["simulation", "simulation", "triage"]
     assert out["simulated_targets"][2]["tier"] is None
+    # The cap summary counts only wallets that were actually backtested: the
+    # triage fallback has no backtest, so it is neither an upgrade nor part
+    # of the denominator. The two simulated wallets stay flat, so every level
+    # reports zero upgrades — an answer, not a hidden line.
+    assert out["cap_sweep_backtested"] == 2
+    assert out["cap_sweep_upgrades"] == [
+        {"cap_usd": 10.0, "upgrades": 0},
+        {"cap_usd": 15.0, "upgrades": 0},
+        {"cap_usd": 20.0, "upgrades": 0},
+    ]
 
 
 def test_a_measured_rejection_is_not_an_outage_signal():
@@ -519,11 +531,12 @@ def test_a_sweep_exception_counts_toward_the_failure_streak(monkeypatch):
     fallback reason.
     """
     import pipeline.phase3_simulation_rank as phase3
+    import screener.simulated_verdict as simulated_verdict
 
     def exploding_sweep(wallet, **kwargs):
         raise RuntimeError("Boom")
 
-    monkeypatch.setattr(phase3, "run_slippage_sensitivity_sweep", exploding_sweep)
+    monkeypatch.setattr(simulated_verdict, "run_slippage_sensitivity_sweep", exploding_sweep)
 
     out = phase3.run_phase3_simulation_rank(
         targets=[_triage_target("0x1111"), _triage_target("0x2222")],
@@ -615,6 +628,180 @@ def test_balance_miss_survives_a_response_without_market_stats():
     assert out["simulated_targets"][0]["balance_miss_details"] == []
 
 
+def test_the_feed_carries_the_per_cap_backtest_for_each_wallet():
+    """Wallets that passed screening are backtested under rising per-position
+    caps; each level's verdict is published beside the headline one, labelled
+    by cap so a reader can see what a wider cap would have changed."""
+    def fetcher(payload):
+        cap = payload["sim_max_per_token"]
+        # A wallet that only pays off once allowed to size up.
+        pnl = 10.0 * cap if payload["slippage"] == 2.0 else 7.0 * cap
+        return {"sim_total_pnl": pnl, "target_total_pnl": 500.0, "logs": [{"type": "INTERCEPT"}]}
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=fetcher
+    )
+    row = out["simulated_targets"][0]
+    sweep = row["cap_sweep"]
+
+    assert [r["cap_usd"] for r in sweep] == [5.0, 10.0, 15.0, 20.0]
+    # 7/10 retention at every level in this fixture -> A-Tier everywhere.
+    assert all(r["edge_retention"] == pytest.approx(0.7) for r in sweep)
+    assert [r["tier"] for r in sweep] == ["A-Tier (Strong Copy Target)"] * 4
+    assert [round(r["window_max_usd"], 2) for r in sweep] == [166.67, 333.33, 500.0, 666.67]
+    assert out["cap_sweep_levels"] == [5.0, 10.0, 15.0, 20.0]
+    assert out["cap_sweep_baseline_cap"] == 5.0
+    # Constant retention means no level outranks the headline — zero upgrades
+    # at every level, reported as zeros rather than hidden.
+    assert out["cap_sweep_upgrades"] == [
+        {"cap_usd": 10.0, "upgrades": 0},
+        {"cap_usd": 15.0, "upgrades": 0},
+        {"cap_usd": 20.0, "upgrades": 0},
+    ]
+    assert out["cap_sweep_backtested"] == 1
+
+
+def test_a_degraded_run_publishes_no_cap_backtest():
+    """With no simulation there is no cap backtest, and none is fabricated."""
+    def failing_fetcher(payload):
+        raise RuntimeError("Network down")
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=failing_fetcher,
+        endpoint_failure_threshold=1,
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "triage"
+    assert row["cap_sweep"] == []
+    # With nothing backtested, the summary claims no upgrades and no sample.
+    assert out["cap_sweep_upgrades"] == []
+    assert out["cap_sweep_backtested"] == 0
+
+
+def test_the_summary_counts_wallets_that_would_upgrade_at_wider_caps():
+    """The header summary's promise: for each wider cap, how many backtested
+    wallets earn a tier above their headline verdict."""
+    def cap_dependent_fetcher(payload):
+        # PnL at 10% slippage varies by wallet and by the cap in force; the
+        # 2% baseline is flat, so Edge Retention is pnl_10 / 100.
+        pnl_10 = {
+            # Upgrades at every wider level: C -> B -> A -> S.
+            "0x1111": {5: 40.0, 10: 55.0, 15: 75.0, 20: 90.0},
+            # A-Tier at every cap, so never an upgrade.
+            "0x2222": {5: 80.0, 10: 80.0, 15: 80.0, 20: 80.0},
+            # Only a $20 cap unlocks it: C at 5/10/15, S at 20.
+            "0x3333": {5: 45.0, 10: 45.0, 15: 45.0, 20: 90.0},
+        }[payload["wallet"]][payload["sim_max_per_token"]]
+        return {
+            "sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else pnl_10,
+            "target_total_pnl": 500.0,
+            "logs": [{"type": "INTERCEPT"}],
+        }
+
+    out = run_phase3_simulation_rank(
+        targets=[
+            _triage_target("0x1111"),
+            _triage_target("0x2222"),
+            _triage_target("0x3333"),
+        ],
+        profile=CURRENT_PROFILE,
+        fetcher=cap_dependent_fetcher,
+    )
+
+    # Headline verdicts come from the $5 cap: 0.40 -> C, 0.80 -> A, 0.45 -> C.
+    tiers = {t["address"]: t["tier"].split(" ")[0] for t in out["simulated_targets"]}
+    assert tiers == {"0x1111": "C-Tier", "0x2222": "A-Tier", "0x3333": "C-Tier"}
+
+    assert out["cap_sweep_backtested"] == 3
+    assert out["cap_sweep_baseline_cap"] == 5.0
+    assert out["cap_sweep_upgrades"] == [
+        {"cap_usd": 10.0, "upgrades": 1},
+        {"cap_usd": 15.0, "upgrades": 1},
+        {"cap_usd": 20.0, "upgrades": 2},
+    ]
+
+
+def test_a_wallet_whose_backtest_errored_is_not_counted(monkeypatch):
+    """A backtest that raised produced no measurement, so it contributes to
+    neither the upgrade counts nor the backtested denominator."""
+    import pipeline.phase3_simulation_rank as phase3
+    import screener.simulated_verdict as simulated_verdict
+
+    def exploding_cap_sweep(wallet, **kwargs):
+        raise RuntimeError("Boom")
+
+    monkeypatch.setattr(simulated_verdict, "run_cap_sensitivity_sweep", exploding_cap_sweep)
+
+    out = phase3.run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "simulation"
+    assert row["cap_sweep"][0].get("error") == "Boom"
+    assert out["cap_sweep_upgrades"] == []
+    assert out["cap_sweep_backtested"] == 0
+
+
+def test_backtest_wallet_at_caps_runs_one_wallet_at_custom_levels():
+    """The web endpoint's single-wallet backtest honours caller-chosen caps,
+    stamps the simulated tier per level, and never touches the profile
+    defaults — the derived profiles exist only for the run."""
+    def fetcher(payload):
+        cap = payload["sim_max_per_token"]
+        # Flat 75% retention: pnl_10 / pnl_2 = 15 / 20 at every cap.
+        pnl = 20.0 * cap if payload["slippage"] == 2.0 else 15.0 * cap
+        return {"sim_total_pnl": pnl, "target_total_pnl": 500.0, "logs": [{"type": "INTERCEPT"}]}
+
+    levels = backtest_wallet_at_caps(
+        "0x1111", [8.0, 25.0], profile=CURRENT_PROFILE, fetcher=fetcher
+    )
+
+    assert [l["cap_usd"] for l in levels] == [8.0, 25.0]
+    assert [l["edge_retention"] for l in levels] == [pytest.approx(0.75)] * 2
+    assert [l["tier"] for l in levels] == ["A-Tier (Strong Copy Target)"] * 2
+    # The window follows the derived cap, not the $5 default.
+    assert [round(l["window_max_usd"], 2) for l in levels] == [
+        round(CURRENT_PROFILE.with_position_cap(8.0).window_max_usd, 2),
+        round(CURRENT_PROFILE.with_position_cap(25.0).window_max_usd, 2),
+    ]
+
+
+def test_backtest_wallet_at_caps_rejects_a_non_positive_cap():
+    """A cap the profile machinery refuses (0 / negative / non-finite) is a
+    client error, surfaced by the endpoint as a 400."""
+    for bad_levels in ([0.0], [-5.0], [float("nan")]):
+        with pytest.raises(ValueError):
+            backtest_wallet_at_caps(
+                "0x1111", bad_levels, profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+            )
+
+
+def test_a_cap_sweep_failure_does_not_cost_the_wallet_its_verdict(monkeypatch):
+    """The cap backtest is extra analysis on top of the headline verdict: an
+    unexpected failure there must not reject a wallet whose headline
+    simulation already succeeded."""
+    import pipeline.phase3_simulation_rank as phase3
+    import screener.simulated_verdict as simulated_verdict
+
+    def exploding_cap_sweep(wallet, **kwargs):
+        raise RuntimeError("Boom")
+
+    monkeypatch.setattr(simulated_verdict, "run_cap_sensitivity_sweep", exploding_cap_sweep)
+
+    out = phase3.run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "simulation"
+    assert row["tier"] is not None
+    assert row["cap_sweep"][0].get("error") == "Boom"
+
+
 def test_the_feed_states_the_profile_its_numbers_were_computed_under():
     out = run_phase3_simulation_rank(
         targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher
@@ -634,7 +821,7 @@ def test_a_fixture_run_never_touches_the_live_feed_file():
     synthetic wallets. The production path (targets=None, reading Phase 2)
     is the only one allowed to publish.
     """
-    feed = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+    feed = os.path.join(DATA_DIR, PHASE3_FILE)
     before = open(feed, "rb").read() if os.path.exists(feed) else None
 
     run_phase3_simulation_rank(

@@ -3,11 +3,10 @@ import urllib.request
 import json
 import time
 import os
+import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# SCRIPT_DIR is app/src/pipeline -> APP_DIR is app/
-APP_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-DATA_DIR = os.path.join(APP_DIR, "data")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from paths import DATA_DIR, PHASE1_FILE
 
 def fetch_and_scrape_leaderboard(min_score=None):
     """
@@ -22,7 +21,7 @@ def fetch_and_scrape_leaderboard(min_score=None):
     unset keeps every profile.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
-    out_file = os.path.join(DATA_DIR, "phase1_scraped_wallets.json")
+    out_file = os.path.join(DATA_DIR, PHASE1_FILE)
     
     scope = "every profile" if min_score is None else f"PolyCop Score > {min_score}"
     print(f"=== PHASE 1: SCRAPING POLYCOP LEADERBOARD ({scope}) ===")
