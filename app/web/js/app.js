@@ -654,10 +654,14 @@ async function startLeaderboardScan() {
         const resp = await fetch("/api/rescan?t=" + Date.now());
         if (!resp.ok) throw new Error("Rescan API returned status " + resp.status);
         const data = await resp.json();
-        allTargets = data.verified_targets || [];
-        updateSummaryHeader(data);
-        filterAndRender();
-        alert(`Scan Complete!\nTotal Scraped: ${data.total_scraped_profiles || 0}\nVerified Targets: ${data.total_verified_targets || 0}`);
+        // The endpoint returns the Phase 3 payload, which is what the feed
+        // file now holds too, so the page rereads it through the one path
+        // that knows how to normalise it. Reading the response here instead
+        // meant a second copy of that knowledge, and it had already drifted:
+        // it looked for `verified_targets`, which no payload has ever had,
+        // so a finished scan emptied the grid it was supposed to fill.
+        await loadDataset();
+        alert(`Scan Complete!\nTargets evaluated: ${data.total_targets_evaluated ?? 0}\nSimulated survivors: ${data.simulated_survivors_count ?? 0}`);
     } catch (err) {
         console.error("Leaderboard scan error:", err);
         alert("Scan failed: " + err.message);
