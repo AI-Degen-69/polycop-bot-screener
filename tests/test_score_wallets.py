@@ -8,9 +8,19 @@ SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from screener.score_wallets import calculate_bankroll_optimized_score
+from screener.score_wallets import calculate_bankroll_optimized_score, calculate_edge_retention
 
 class TestScoreWalletsEngine(unittest.TestCase):
+    def test_edge_retention_positive_pnl(self):
+        """Test edge retention on positive PnLs."""
+        self.assertAlmostEqual(calculate_edge_retention(80.0, 100.0), 0.8)
+
+    def test_edge_retention_negative_pnl_returns_none(self):
+        """Test edge retention gate ordering: negative PnL must return None."""
+        self.assertIsNone(calculate_edge_retention(-5.95, -5.05))
+        self.assertIsNone(calculate_edge_retention(-5.0, 10.0))
+        self.assertIsNone(calculate_edge_retention(10.0, 0.0))
+
     
     def test_pass_target_high_score(self):
         """Test a clean S-Tier target passing all gates."""

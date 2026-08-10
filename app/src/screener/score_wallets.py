@@ -14,6 +14,17 @@ from execution.copy_execution_profile import CURRENT_PROFILE
 # not part of the Copy Execution Profile.
 WHALE_AVG_INVEST_LIMIT_USD = 300.0
 
+def calculate_edge_retention(pnl_10_pct: float, pnl_2_pct: float) -> float | None:
+    """
+    Calculate edge retention ratio between 10% and 2% slippage simulation levels.
+    Enforces gate ordering: PnL at 10% must be > $0 and PnL at 2% must be > $0.
+    Returns None if either simulation level produced non-positive PnL.
+    """
+    if pnl_10_pct <= 0 or pnl_2_pct <= 0:
+        return None
+    return pnl_10_pct / pnl_2_pct
+
+
 def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRENT_PROFILE):
     """
     PolyCop Continuous Linear Screener Engine, run under one Copy Execution Profile.

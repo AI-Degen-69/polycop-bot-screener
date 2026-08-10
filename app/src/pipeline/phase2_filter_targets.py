@@ -14,8 +14,9 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from execution.copy_execution_profile import CURRENT_PROFILE
-from screener.score_wallets import calculate_bankroll_optimized_score
+from screener.score_wallets import calculate_bankroll_optimized_score, calculate_edge_retention
 from screener.activity import compute_activity, parse_timestamp, summarize_buckets
+from pipeline.run_mock_client import parse_run_mock_response, calculate_copyable_window_share
 
 def run_phase2_filter(profile=CURRENT_PROFILE):
     """
@@ -84,6 +85,10 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
         raw_name = p.get("name") or p.get("username")
         name_str = str(raw_name) if raw_name else f"PolyCop_Trader ({addr[:6]}...{addr[-4:]})"
 
+        mock_payload = p.get("run_mock_response") or p.get("mock_data")
+        sim_summary = parse_run_mock_response(mock_payload) if mock_payload else None
+        window_share = calculate_copyable_window_share(mock_payload) if mock_payload else None
+
         target_entry = {
             "address": addr,
             "name": name_str,
@@ -91,6 +96,8 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
             "final_score": score,
             "grade": audit_res["grade"],
             "is_hidden_gem": is_gem,
+            "copyable_window_share": round(window_share, 4) if window_share is not None else None,
+            "simulation_summary": sim_summary,
             "metrics": {
                 "polycop_site_score": raw_metrics["polycop_site_score"],
                 "actual_pnl": round(raw_metrics["actual_pnl"], 2),
@@ -110,6 +117,7 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
             "breakdown": audit_res["breakdown"],
             "bankroll_analysis": audit_res["bankroll_analysis"]
         }
+
 
         verified_targets.append(target_entry)
         if score >= 90.0:
