@@ -26,6 +26,14 @@ class TestRenderedBlockComesFromTheCode(unittest.TestCase):
         self.assertIn("5.0% modelled", block)  # slippage gate
         self.assertIn("&ge; 72", block)        # recalibrated S-Tier floor
 
+    def test_the_block_contains_the_simulated_verdict_bands(self):
+        # The verdict bands (ADR 0002) are rendered from the same constants
+        # assign_simulated_tier reads, never from prose.
+        block = scoring_docs.render_block()
+        self.assertIn("Simulated Verdict Tier Bands", block)
+        self.assertIn("&ge; 0.85", block)  # simulated S-Tier floor
+        self.assertIn("&ge; 0.30", block)  # simulated C-Tier floor
+
 
 class TestTheCheckFailsOnADeliberateMismatch(unittest.TestCase):
     """The proof demanded by the ticket: corrupt a doc and the check fails."""
@@ -122,8 +130,8 @@ class TestWebUiLabelsAreRenderedFromTheCode(unittest.TestCase):
         )
         self.assertEqual(self._tamper_ui(entry, tampered), 1)
 
-    def test_a_stale_weight_percentage_fails_the_check(self):
-        entry = self._label("Edge-to-Friction Ratio bar entry")
+    def test_a_stale_bankroll_label_fails_the_check(self):
+        entry = self._label("copy bankroll phrase")
         tampered = self._read_real(entry["relpath"]).replace(
             entry["expected"], self._stale_variant(entry)
         )

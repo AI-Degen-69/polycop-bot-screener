@@ -556,45 +556,16 @@ function navigateModal(direction) {
     openModal(currentModalIndex);
 }
 
-function findSizingFitKey(b) {
-    // Sizing Fit's breakdown key embeds the profile-derived peak, so it is
-    // matched by prefix rather than hard-coded. Shared by the bars and the
-    // radar so a renamed key is caught in one place.
-    return Object.keys(b || {}).find(k => k.startsWith("8. Sizing Fit"));
-}
-
 function renderParamBars(target) {
     const container = document.getElementById("paramBarsContainer");
     const b = target.breakdown || {};
+    const labels = target.breakdown_labels || {};
+    const points = target.breakdown_points || {};
 
-    // The eleven reweighted parameters, keyed exactly as the engine names them.
-    // A renamed key here would silently render every bar empty, so these are
-    // kept in lockstep with the engine's breakdown output.
-    const sizingKey = findSizingFitKey(b);
-    const maxScores = {
-        "1. Edge-to-Friction Ratio (22%)": 22,
-        "2. Slippage Cost Rate (15%)": 15,
-        "3. Drawdown Depth (12%)": 12,
-        "4. Copyable Window Share (10%)": 10,
-        "5. Recent Form (10%)": 10,
-        "6. Daily Green Rate (8%)": 8,
-        "7. Profit/Loss Ratio (8%)": 8,
-        "8. Sizing Fit": sizingKey ? 5 : null,
-        "9. Hedged Control < 3% (5%)": 5,
-        "10. Markets Sample (3%)": 3,
-        "11. Capital Efficiency (2%)": 2
-    };
-    // Pin the real Sizing Fit key in place of the placeholder, so the bar
-    // renders in position 8 rather than being appended after Capital
-    // Efficiency.
-    if (sizingKey) {
-        maxScores[sizingKey] = 5;
-        delete maxScores["8. Sizing Fit"];
-    } else {
-        delete maxScores["8. Sizing Fit"];
-    }
-
-    const keys = Object.keys(maxScores);
+    // The eleven parameters are keyed by stable ids (engine parameter order).
+    // Labels and maxima come from the feed, so the UI has no hardcoded weight
+    // or percentage literals — a reweight cannot leave the page stale.
+    const keys = Object.keys(labels);
     if (!keys.some(k => b[k] !== undefined)) {
         container.innerHTML = `<div class="bm-empty">No breakdown was carried through for this wallet.</div>`;
         return;
@@ -602,13 +573,13 @@ function renderParamBars(target) {
 
     container.innerHTML = keys.map(key => {
         const score = b[key] || 0.0;
-        const max = maxScores[key];
-        const pct = Math.min((score / max) * 100, 100);
+        const max = points[key] || 0;
+        const pct = max > 0 ? Math.min((score / max) * 100, 100) : 0;
 
         return `
             <div class="param-bar-item">
                 <div class="param-bar-header">
-                    <span class="param-bar-title">${key}</span>
+                    <span class="param-bar-title">${labels[key] || key}</span>
                     <span class="param-bar-score">${score} / ${max} pts</span>
                 </div>
                 <div class="bar-track-outer">
@@ -625,41 +596,17 @@ function renderRadarChart(target) {
 
     const getScorePct = (score, max) => Math.round(Math.min(Math.max((score / max) * 100, 0), 100));
     const b = target.breakdown || {};
+    const labels = target.radar_labels || {};
+    const points = target.breakdown_points || {};
 
-    // Mirrors renderParamBars: Sizing Fit's key embeds the profile-derived
-    // peak, so it is matched by prefix via the shared helper.
-    const sizingKey = findSizingFitKey(b);
-
-    const radarValues = [
-        getScorePct(b["1. Edge-to-Friction Ratio (22%)"] || 0, 22),
-        getScorePct(b["2. Slippage Cost Rate (15%)"] || 0, 15),
-        getScorePct(b["3. Drawdown Depth (12%)"] || 0, 12),
-        getScorePct(b["4. Copyable Window Share (10%)"] || 0, 10),
-        getScorePct(b["5. Recent Form (10%)"] || 0, 10),
-        getScorePct(b["6. Daily Green Rate (8%)"] || 0, 8),
-        getScorePct(b["7. Profit/Loss Ratio (8%)"] || 0, 8),
-        getScorePct(sizingKey ? (b[sizingKey] || 0) : 0, 5),
-        getScorePct(b["9. Hedged Control < 3% (5%)"] || 0, 5),
-        getScorePct(b["10. Markets Sample (3%)"] || 0, 3),
-        getScorePct(b["11. Capital Efficiency (2%)"] || 0, 2)
-    ];
+    // Radar labels and maxima come from the feed, matching the stable ids.
+    const keys = Object.keys(labels);
+    const radarValues = keys.map(k => getScorePct(b[k] || 0, points[k] || 0));
 
     radarChartInstance = new Chart(ctx, {
         type: 'radar',
         data: {
-            labels: [
-                'Edge/Friction (22%)',
-                'Slippage Cost (15%)',
-                'Drawdown (12%)',
-                'Window Share (10%)',
-                'Recent Form (10%)',
-                'Green Rate (8%)',
-                'P/L Ratio (8%)',
-                'Sizing Fit (5%)',
-                'Hedged (5%)',
-                'Markets (3%)',
-                'Efficiency (2%)'
-            ],
+            labels: keys.map(k => labels[k]),
             datasets: [{
                 label: 'Screener Score %',
                 data: radarValues,

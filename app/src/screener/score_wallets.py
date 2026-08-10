@@ -99,6 +99,16 @@ TIER_C_MIN = 50.0
 # score rates it poorly. Tied to the recalibrated A-Tier floor (ADR 0005).
 GEM_SITE_SCORE_MAX = 75.0
 
+# Simulated Verdict tier bands, on Edge Retention (the share of simulated
+# profit that survives rising friction). ADR 0002: verdicts come from
+# simulation, so these bands grade simulated performance — distinct from the
+# triage bands above, which only order wallets for simulation. Inherited from
+# the outgoing engine; recalibration would follow ADR 0005's method.
+SIM_TIER_S_MIN = 0.85
+SIM_TIER_A_MIN = 0.70
+SIM_TIER_B_MIN = 0.50
+SIM_TIER_C_MIN = 0.30
+
 # ---------------------------------------------------------------------------
 # Machine-readable scoring spec. Rendered into the docs by tools/scoring_docs.py;
 # the CI drift check fails when the docs drift from it.
@@ -154,6 +164,7 @@ SCORING_SPEC = {
             "zero": f"<= {EDGE_TO_FRICTION_BREAK_EVEN:.1f} (break-even)",
             "full": f">= {EDGE_TO_FRICTION_FULL_MARKS:.1f}",
             "note": "edge per dollar of friction; the cheapest disqualifying arithmetic runs first",
+            "radar": "Edge/Friction",
         },
         {
             "name": "Slippage Cost Rate",
@@ -161,6 +172,7 @@ SCORING_SPEC = {
             "zero": f">= {SLIPPAGE_COST_RATE_GATE * 100:.1f}%",
             "full": "<= 1.0%",
             "note": "modelled, before the Friction Realism Multiplier",
+            "radar": "Slippage Cost",
         },
         {
             "name": "Drawdown Depth",
@@ -168,6 +180,7 @@ SCORING_SPEC = {
             "zero": f">= {DRAWDOWN_DEPTH_ZERO_AT:.2f} of peak",
             "full": "0.0",
             "note": "from the lifetime equity curve",
+            "radar": "Drawdown",
         },
         {
             "name": "Copyable Window Share",
@@ -175,6 +188,7 @@ SCORING_SPEC = {
             "zero": "0%",
             "full": "100%",
             "note": "share of trades the Copyable Trade Window admits",
+            "radar": "Window Share",
         },
         {
             "name": "Recent Form",
@@ -182,6 +196,7 @@ SCORING_SPEC = {
             "zero": "PnL <= $0 or slip unmeasured",
             "full": f">= {RECENT_FORM_FULL_MARKS_RETURN * 100:.0f}% return over the recent-{RECENT_FORM_WINDOW_TRADES:.0f} window at 0% slip",
             "note": "return on deployed capital, judged against the friction it came through (ADR 0004)",
+            "radar": "Recent Form",
         },
         {
             "name": "Daily Green Rate",
@@ -189,6 +204,7 @@ SCORING_SPEC = {
             "zero": f"< 40% or fewer than {MIN_OBSERVED_DAYS:.0f} observed days",
             "full": ">= 85%",
             "note": "copy-adjusted, measured from real per-day simulated results",
+            "radar": "Green Rate",
         },
         {
             "name": "Profit/Loss Ratio",
@@ -196,6 +212,7 @@ SCORING_SPEC = {
             "zero": f"<= {PL_RATIO_GATE:.1f}",
             "full": ">= 3.0",
             "note": "",
+            "radar": "P/L Ratio",
         },
         {
             "name": "Sizing Fit",
@@ -203,6 +220,7 @@ SCORING_SPEC = {
             "zero": "outside the Copyable Trade Window",
             "full": "at the window midpoint",
             "note": "peak derived from the Copy Execution Profile, never hand-picked",
+            "radar": "Sizing Fit",
         },
         {
             "name": "Hedged Control",
@@ -210,6 +228,7 @@ SCORING_SPEC = {
             "zero": f">= {HEDGED_RATE_GATE_PCT:.1f}%",
             "full": "0%",
             "note": "",
+            "radar": "Hedged",
         },
         {
             "name": "Markets Sample",
@@ -217,6 +236,7 @@ SCORING_SPEC = {
             "zero": f"< {MARKETS_GATE:.0f}",
             "full": ">= 200",
             "note": "",
+            "radar": "Markets",
         },
         {
             "name": "Capital Efficiency",
@@ -224,6 +244,7 @@ SCORING_SPEC = {
             "zero": "0",
             "full": ">= 30 PnL/volume ratio",
             "note": "",
+            "radar": "Efficiency",
         },
     ],
     "tiers": [
@@ -232,6 +253,13 @@ SCORING_SPEC = {
         {"label": "B-Tier (Moderate Copy Target)", "min": TIER_B_MIN},
         {"label": "C-Tier (High Risk / Volatile)", "min": TIER_C_MIN},
         {"label": "F-Tier (Toxic / Rejection)", "min": None},
+    ],
+    "sim_tiers": [
+        {"label": "S-Tier (God-Tier Target)", "min": SIM_TIER_S_MIN},
+        {"label": "A-Tier (Strong Copy Target)", "min": SIM_TIER_A_MIN},
+        {"label": "B-Tier (Moderate Copy Target)", "min": SIM_TIER_B_MIN},
+        {"label": "C-Tier (High Risk / Volatile)", "min": SIM_TIER_C_MIN},
+        {"label": "F-Tier / REJECT", "min": None},
     ],
 }
 
@@ -356,7 +384,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         span = EDGE_TO_FRICTION_FULL_MARKS - EDGE_TO_FRICTION_BREAK_EVEN
         etf_score = 22.0 * ((edge_to_friction - EDGE_TO_FRICTION_BREAK_EVEN) / span)
     score += etf_score
-    breakdown["1. Edge-to-Friction Ratio (22%)"] = round(etf_score, 2)
+    breakdown["edge_to_friction"] = round(etf_score, 2)
 
     # 2. Slippage Cost Rate (15 pts)
     if slip_cost_rate <= 0.01:
@@ -366,7 +394,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     else:
         slip_score = 15.0 * (1.0 - ((slip_cost_rate - 0.01) / (SLIPPAGE_COST_RATE_GATE - 0.01)))
     score += slip_score
-    breakdown["2. Slippage Cost Rate (15%)"] = round(slip_score, 2)
+    breakdown["slippage_cost_rate"] = round(slip_score, 2)
 
     # 3. Drawdown Depth (12 pts)
     if drawdown_depth is None:
@@ -374,12 +402,12 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     else:
         dd_score = max(0.0, 12.0 * (1.0 - min(1.0, drawdown_depth / DRAWDOWN_DEPTH_ZERO_AT)))
     score += dd_score
-    breakdown["3. Drawdown Depth (12%)"] = round(dd_score, 2)
+    breakdown["drawdown_depth"] = round(dd_score, 2)
 
     # 4. Copyable Window Share (10 pts)
     cws_score = 0.0 if window_share is None else min(10.0, max(0.0, window_share * 10.0))
     score += cws_score
-    breakdown["4. Copyable Window Share (10%)"] = round(cws_score, 2)
+    breakdown["window_share"] = round(cws_score, 2)
 
     # 5. Recent Form (10 pts) - recent return judged against the friction it came through
     if r20_pnl <= 0 or r20_slip is None or avg_inv <= 0:
@@ -391,7 +419,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         return_factor = min(recent_return / RECENT_FORM_FULL_MARKS_RETURN, 1.0)
         rf_score = 10.0 * slip_factor * return_factor
     score += rf_score
-    breakdown["5. Recent Form (10%)"] = round(rf_score, 2)
+    breakdown["recent_form"] = round(rf_score, 2)
 
     # 6. Daily Green Rate (8 pts) - a rate drawn from too few days is a streak
     if daily_green_rate is None or observed_days < MIN_OBSERVED_DAYS or daily_green_rate <= 40.0:
@@ -401,7 +429,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     else:
         days_score = 8.0 * ((daily_green_rate - 40.0) / (85.0 - 40.0))
     score += days_score
-    breakdown["6. Daily Green Rate (8%)"] = round(days_score, 2)
+    breakdown["daily_green_rate"] = round(days_score, 2)
 
     # 7. Profit/Loss Ratio (8 pts)
     if pl_ratio <= PL_RATIO_GATE:
@@ -411,7 +439,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     else:
         pl_score = 8.0 * ((pl_ratio - PL_RATIO_GATE) / (3.0 - PL_RATIO_GATE))
     score += pl_score
-    breakdown["7. Profit/Loss Ratio (8%)"] = round(pl_score, 2)
+    breakdown["pl_ratio"] = round(pl_score, 2)
 
     # 8. Sizing Fit (5 pts) - full marks at the window midpoint, nothing outside it
     #
@@ -429,7 +457,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     else:
         inv_score = 5.0 * ((window_high - avg_inv) / (window_high - sizing_peak))
     score += inv_score
-    breakdown[f"8. Sizing Fit (${sizing_peak:.0f} Peak) (5%)"] = round(inv_score, 2)
+    breakdown["sizing_fit"] = round(inv_score, 2)
 
     # 9. Hedged Control (5 pts)
     if hedged > HEDGED_RATE_GATE_PCT:
@@ -437,7 +465,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     else:
         hedged_score = 5.0 * (1.0 - (hedged / HEDGED_RATE_GATE_PCT))
     score += hedged_score
-    breakdown["9. Hedged Control < 3% (5%)"] = round(hedged_score, 2)
+    breakdown["hedged_control"] = round(hedged_score, 2)
 
     # 10. Markets Sample (3 pts)
     if mkts < MARKETS_GATE:
@@ -447,13 +475,45 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     else:
         mkt_score = 3.0 * ((mkts - MARKETS_GATE) / (200.0 - MARKETS_GATE))
     score += mkt_score
-    breakdown["10. Markets Sample (3%)"] = round(mkt_score, 2)
+    breakdown["markets_sample"] = round(mkt_score, 2)
 
     # 11. Capital Efficiency (2 pts)
     pv_clamped = min(max(pnl_vol, 0.0), 30.0)
     pv_score = 2.0 * (pv_clamped / 30.0)
     score += pv_score
-    breakdown["11. Capital Efficiency (2%)"] = round(pv_score, 2)
+    breakdown["capital_efficiency"] = round(pv_score, 2)
+
+    # Build the display labels from the spec, once per call. The Sizing Fit
+    # label is the only one that varies per target (it embeds the profile),
+    # so it is built here rather than as a module-level constant.
+    breakdown_labels = {}
+    radar_labels = {}
+    breakdown_points = {}
+    for i, param in enumerate(SCORING_SPEC["parameters"], start=1):
+        pts = param["points"]
+        # Map parameter name to the stable breakdown key.
+        if param["name"] == "Sizing Fit":
+            bid = "sizing_fit"
+            blbl = f"{i}. Sizing Fit (${sizing_peak:.0f} Peak) ({pts}%)"
+        elif param["name"] == "Hedged Control":
+            bid = "hedged_control"
+            blbl = f"{i}. Hedged Control < {HEDGED_RATE_GATE_PCT:.0f}% ({pts}%)"
+        else:
+            bid = {
+                "Edge-to-Friction Ratio": "edge_to_friction",
+                "Slippage Cost Rate": "slippage_cost_rate",
+                "Drawdown Depth": "drawdown_depth",
+                "Copyable Window Share": "window_share",
+                "Recent Form": "recent_form",
+                "Daily Green Rate": "daily_green_rate",
+                "Profit/Loss Ratio": "pl_ratio",
+                "Markets Sample": "markets_sample",
+                "Capital Efficiency": "capital_efficiency",
+            }[param["name"]]
+            blbl = f"{i}. {param['name']} ({pts}%)"
+        breakdown_labels[bid] = blbl
+        radar_labels[bid] = param["radar"] + f" ({pts}%)"
+        breakdown_points[bid] = pts
 
     final_score = round(score, 2)
 
@@ -475,6 +535,9 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         "grade": grade,
         "rejection_reasons": rejection_reasons,
         "breakdown": breakdown,
+        "breakdown_labels": breakdown_labels,
+        "radar_labels": radar_labels,
+        "breakdown_points": breakdown_points,
         "bankroll_analysis": {
             "available_capital": profile.bankroll_usd,
             "target_avg_invest_usd": avg_inv,

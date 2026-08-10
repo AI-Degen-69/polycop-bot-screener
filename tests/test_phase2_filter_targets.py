@@ -85,7 +85,15 @@ def _run(profiles):
 
 
 def _points(target, needle):
-    matched = [v for k, v in target["breakdown"].items() if needle in k]
+    # Try stable id first, then the display labels.
+    b = target["breakdown"]
+    labels = target.get("breakdown_labels", {})
+    if needle in b:
+        return b[needle]
+    for bid, lbl in labels.items():
+        if needle in lbl:
+            return b[bid]
+    matched = [v for k, v in b.items() if needle in k]
     assert len(matched) == 1, f"expected one breakdown row matching {needle!r}, got {matched}"
     return matched[0]
 

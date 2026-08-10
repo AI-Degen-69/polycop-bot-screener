@@ -54,6 +54,16 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 | C-Tier (High Risk / Volatile) | &ge; 50 |
 | F-Tier (Toxic / Rejection) | < 50 |
 
+#### Simulated Verdict Tier Bands (Edge Retention — the verdict)
+
+| Tier | Edge Retention |
+| :--- | :--- |
+| S-Tier (God-Tier Target) | &ge; 0.85 |
+| A-Tier (Strong Copy Target) | &ge; 0.70 |
+| B-Tier (Moderate Copy Target) | &ge; 0.50 |
+| C-Tier (High Risk / Volatile) | &ge; 0.30 |
+| F-Tier / REJECT | < 0.30 |
+
 <!-- SCORING-SPEC:END -->
 
 **Data Evidence Requirement**: Present the numerical breakdown for every weighted parameter alongside the final grade, as the engine reports it in `breakdown`.

@@ -12,28 +12,28 @@ DATA_DIR = os.path.join(APP_DIR, "data")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-try:
-    from execution.copy_execution_profile import CURRENT_PROFILE
-    from screener.slippage_sweep import run_slippage_sensitivity_sweep
-    from pipeline.run_mock_client import calculate_copyable_window_share
-except ModuleNotFoundError:
-    from app.src.execution.copy_execution_profile import CURRENT_PROFILE
-    from app.src.screener.slippage_sweep import run_slippage_sensitivity_sweep
-    from app.src.pipeline.run_mock_client import calculate_copyable_window_share
+from execution.copy_execution_profile import CURRENT_PROFILE
+from screener.simulated_copy_run import calculate_copyable_window_share
+from screener.score_wallets import SIM_TIER_A_MIN, SIM_TIER_B_MIN, SIM_TIER_C_MIN, SIM_TIER_S_MIN
+from screener.slippage_sweep import run_slippage_sensitivity_sweep
 
 def assign_simulated_tier(edge_retention: Optional[float], sim_pnl_10: float) -> str:
     """
     Assign Tier based on simulated edge retention performance.
+
+    Bands come from the same constants that generate the docs (SCORING_SPEC
+    "sim_tiers"), so the verdict shown on the page cannot drift from what the
+    documentation says. See ADR 0002.
     """
     if edge_retention is None or sim_pnl_10 <= 0:
         return "F-Tier / REJECT"
-    if edge_retention >= 0.85:
+    if edge_retention >= SIM_TIER_S_MIN:
         return "S-Tier (God-Tier Target)"
-    elif edge_retention >= 0.70:
+    elif edge_retention >= SIM_TIER_A_MIN:
         return "A-Tier (Strong Copy Target)"
-    elif edge_retention >= 0.50:
+    elif edge_retention >= SIM_TIER_B_MIN:
         return "B-Tier (Moderate Copy Target)"
-    elif edge_retention >= 0.30:
+    elif edge_retention >= SIM_TIER_C_MIN:
         return "C-Tier (High Risk / Volatile)"
     else:
         return "F-Tier / REJECT"
@@ -88,6 +88,9 @@ def _carry_through_triage(target: Dict[str, Any]) -> Dict[str, Any]:
         "is_hidden_gem": target.get("is_hidden_gem"),
         "activity": target.get("activity"),
         "breakdown": target.get("breakdown"),
+        "breakdown_labels": target.get("breakdown_labels"),
+        "radar_labels": target.get("radar_labels"),
+        "breakdown_points": target.get("breakdown_points"),
         "bankroll_analysis": target.get("bankroll_analysis"),
         "metrics": target.get("metrics"),
     }

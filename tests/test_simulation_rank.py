@@ -1,6 +1,39 @@
+import os
+import sys
+
 import pytest
-from app.src.execution.copy_execution_profile import CURRENT_PROFILE
-from app.src.pipeline.phase3_simulation_rank import run_phase3_simulation_rank
+
+SCRIPT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app", "src"))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
+from pipeline.phase3_simulation_rank import assign_simulated_tier, run_phase3_simulation_rank  # noqa: E402
+from screener.score_wallets import (  # noqa: E402
+    SIM_TIER_A_MIN,
+    SIM_TIER_B_MIN,
+    SIM_TIER_C_MIN,
+    SIM_TIER_S_MIN,
+)
+
+def test_the_simulated_verdict_bands_are_the_documented_constants():
+    """The tier a reader sees is assigned by the same constants the docs render.
+
+    ADR 0002 makes simulation the verdict; these bands are that verdict's
+    source of truth, so the boundary behaviour is pinned to the constants
+    rather than to prose.
+    """
+    assert assign_simulated_tier(SIM_TIER_S_MIN, 100.0) == "S-Tier (God-Tier Target)"
+    assert assign_simulated_tier(SIM_TIER_A_MIN, 100.0) == "A-Tier (Strong Copy Target)"
+    assert assign_simulated_tier(SIM_TIER_B_MIN, 100.0) == "B-Tier (Moderate Copy Target)"
+    assert assign_simulated_tier(SIM_TIER_C_MIN, 100.0) == "C-Tier (High Risk / Volatile)"
+    assert assign_simulated_tier(SIM_TIER_C_MIN - 0.01, 100.0) == "F-Tier / REJECT"
+
+
+def test_a_non_positive_simulated_pnl_or_absent_retention_rejects():
+    assert assign_simulated_tier(0.99, 0.0) == "F-Tier / REJECT"
+    assert assign_simulated_tier(None, 100.0) == "F-Tier / REJECT"
+
 
 def test_scan_rank_is_stamped_from_the_final_ordering():
     """Rank within the scan is read off the published order, 1-based.
@@ -107,7 +140,7 @@ def _triage_target(address, **overrides):
         "grade": "A-Tier (Strong Copy Target)",
         "is_hidden_gem": True,
         "activity": {"hours_since_active": 3.0, "trades_7d": 12},
-        "breakdown": {"1. Edge-to-Friction Ratio (22%)": 18.0},
+        "breakdown": {"edge_to_friction": 18.0},
         "bankroll_analysis": {"min_target_order_floor_usd": 8.33},
         "metrics": {"avg_invest": 100.0, "polycop_site_score": 70.0},
     }

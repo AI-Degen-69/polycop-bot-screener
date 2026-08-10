@@ -1,5 +1,17 @@
+import os
+import sys
+
 import pytest
-from app.src.pipeline.run_mock_client import build_run_mock_payload, parse_run_mock_response, calculate_copyable_window_share
+
+SCRIPT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app", "src"))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+from pipeline.run_mock_client import build_run_mock_payload  # noqa: E402
+from screener.simulated_copy_run import (  # noqa: E402
+    calculate_copyable_window_share,
+    parse_simulated_run_response,
+)
 
 def test_build_run_mock_payload_defaults():
     wallet = "0xeafc018ccbca46db203ba57c3e798ce0e84fe4c4"
@@ -34,7 +46,7 @@ def test_parse_run_mock_response_summary():
         ]
     }
     
-    parsed = parse_run_mock_response(mock_data)
+    parsed = parse_simulated_run_response(mock_data)
     assert parsed["sim_total_pnl"] == -5.953
     assert parsed["target_total_pnl"] == 99295.84
     assert parsed["max_drawdown"] == 7.18
@@ -57,9 +69,9 @@ def test_calculate_copyable_window_share_reconciliation():
     assert share == 0.5
 
 def test_fetch_simulated_copy_run_caching_and_injected_fetcher(tmp_path):
-    from app.src.execution.copy_execution_profile import CopyExecutionProfile
+    from execution.copy_execution_profile import CopyExecutionProfile
 
-    from app.src.pipeline.run_mock_client import fetch_simulated_copy_run
+    from pipeline.run_mock_client import fetch_simulated_copy_run
 
     profile1 = CopyExecutionProfile(bankroll_usd=100.0, copy_ratio=0.03)
     profile2 = CopyExecutionProfile(bankroll_usd=200.0, copy_ratio=0.05)
@@ -92,8 +104,8 @@ def test_fetch_simulated_copy_run_caching_and_injected_fetcher(tmp_path):
     assert call_count == 2
 
 def test_fetch_simulated_copy_run_unavailable_result(tmp_path):
-    from app.src.execution.copy_execution_profile import CURRENT_PROFILE
-    from app.src.pipeline.run_mock_client import fetch_simulated_copy_run
+    from execution.copy_execution_profile import CURRENT_PROFILE
+    from pipeline.run_mock_client import fetch_simulated_copy_run
 
 
     def failing_fetcher(payload):
