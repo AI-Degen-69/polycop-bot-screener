@@ -28,11 +28,14 @@ WHALE_AVG_INVEST_LIMIT_USD = 200.0
 # is gone, so this is what stops arbitrary garbage from being scored.
 SITE_SCORE_SANITY_FLOOR = 40.0
 
-# Toxic Copy Poison: a modelled copy that loses money is not a target.
-BACKTEST_COPY_PNL_MIN_USD = 0.0
+# Toxic Copy Poison: a modelled copy that loses money is not a target. The
+# name uses CONTEXT.md's term "Modelled Copy PnL" — never "backtest copy PnL"
+# (the glossary lists it under _Avoid_).
+MODELLED_COPY_PNL_MIN_USD = 0.0
 
-# Slippage Cost Rate gate, in modelled terms. 5% modelled is roughly 20% real under
-# the Friction Realism Multiplier of 4.2 (ADR 0001).
+# Slippage Cost Rate gate, in modelled terms. The real-friction equivalent is
+# FRICTION_REALISM_MULTIPLIER times this (ADR 0001); the docs render that
+# product, so the number is not repeated here and cannot drift.
 SLIPPAGE_COST_RATE_GATE = 0.05
 
 # How much worse real execution friction is than the leaderboard model assumes.
@@ -123,7 +126,7 @@ SCORING_SPEC = {
         },
         {
             "name": "Toxic Copy Poison",
-            "condition": f"Copy PnL < ${BACKTEST_COPY_PNL_MIN_USD:.0f}",
+            "condition": f"Modelled Copy PnL < ${MODELLED_COPY_PNL_MIN_USD:.0f}",
             "reason": "a modelled copy that loses money is not a target",
         },
         {
@@ -256,6 +259,15 @@ SCORING_SPEC = {
 }
 
 
+def _hard_rejection_gates_doc() -> str:
+    """The numbered gate list, generated from SCORING_SPEC so the engine's
+    docstring can never disagree with the constants (issue #27)."""
+    return "\n".join(
+        f"{i}. {gate['name']} ({gate['condition']}) -> {gate['reason']}."
+        for i, gate in enumerate(SCORING_SPEC["gates"], start=1)
+    )
+
+
 def _measured(value):
     """A metric that was actually measured, or None if it was not.
 
@@ -308,15 +320,10 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     Its former ten points were redistributed proportionally across the parameters
     triage can actually measure.
 
-    HARD REJECTION GATES (see SCORING_SPEC):
-    1. PolyCop Site Score < 40.0 -> Low quality sanity floor.
-    2. Backtest Copy PnL < $0 -> Toxic Copy Poison.
-    3. Slippage Cost Rate > 5% modelled (0.05) -> Friction limit.
-    4. Hedged Rate > 3.0% -> $100 Bankroll ratio distortion / arb risk.
-    5. P/L Ratio < 0.3 -> Liquidation Risk.
-    6. Markets Sample < 20 -> Short Track Record.
-    7. Avg Invest > $200.00 USD -> Whale Trade Sizing Friction.
-    8. Divergence Gate: r20_pnl < 0 while actual_pnl > $1,000 -> Decay / inversion risk.
+    HARD REJECTION GATES: the numbered list is generated into this docstring
+    from SCORING_SPEC at import (see the appended section), so a threshold can
+    never drift here — `tools/scoring_docs.py` renders the same spec into the
+    docs.
     """
     if user_capital is not None:
         profile = profile.with_bankroll(user_capital)
@@ -354,8 +361,8 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     # --- HARD REJECTION GATES ---
     if polycop_site_score < SITE_SCORE_SANITY_FLOOR:
         rejection_reasons.append(f"PolyCop Site Score {polycop_site_score:.0f} < {SITE_SCORE_SANITY_FLOOR:.0f}/100 sanity floor")
-    if copy_pnl < BACKTEST_COPY_PNL_MIN_USD:
-        rejection_reasons.append("Backtest Copy PnL < $0 (Toxic Copy Poison)")
+    if copy_pnl < MODELLED_COPY_PNL_MIN_USD:
+        rejection_reasons.append("Modelled Copy PnL < $0 (Toxic Copy Poison)")
     if slip_cost_rate > SLIPPAGE_COST_RATE_GATE:
         rejection_reasons.append(f"Slippage Cost Rate {slip_cost_rate*100:.1f}% > {SLIPPAGE_COST_RATE_GATE*100:.1f}% modelled limit")
     if hedged > HEDGED_RATE_GATE_PCT:
@@ -538,6 +545,16 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
             "min_target_order_floor_usd": min_target_order_for_1usd
         }
     }
+
+
+# The gate list in the docstring above is generated from SCORING_SPEC at
+# import, so a gate change updates help() automatically and the docstring can
+# never disagree with the constants (issue #27).
+calculate_bankroll_optimized_score.__doc__ = (
+    (calculate_bankroll_optimized_score.__doc__ or "")
+    + "\n\nHARD REJECTION GATES (generated from SCORING_SPEC):\n"
+    + _hard_rejection_gates_doc()
+)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

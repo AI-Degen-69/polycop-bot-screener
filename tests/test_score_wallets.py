@@ -308,6 +308,48 @@ class TestRecalibratedTierBands(unittest.TestCase):
         self.assertEqual(res["grade"], grade_for_score(res["final_score"]))
 
 
+class TestTheDocstringGatesAreGeneratedFromTheSpec(unittest.TestCase):
+    """Issue #27: the engine docstring's gate list is generated from
+    SCORING_SPEC at import, so a threshold changed in the code updates help()
+    automatically and can never drift from the constants the drift check
+    trusts.
+    """
+
+    def test_every_spec_gate_appears_in_the_docstring(self):
+        from screener.score_wallets import SCORING_SPEC
+
+        doc = calculate_bankroll_optimized_score.__doc__
+        for gate in SCORING_SPEC["gates"]:
+            self.assertIn(gate["condition"], doc)
+
+    def test_the_hand_written_gate_copies_are_gone(self):
+        doc = calculate_bankroll_optimized_score.__doc__
+        # The old docstring duplicated thresholds the drift check does not
+        # gate; the generated list carries the spec's own wording instead.
+        self.assertNotIn("Low quality sanity floor", doc)
+        self.assertNotIn("5% modelled (0.05)", doc)
+
+
+class TestTheModelledCopyPnlDomainTerm(unittest.TestCase):
+    """CONTEXT.md's glossary approves "Modelled Copy PnL" and avoids "backtest
+    copy PnL" / "copy PnL"; the gate's constant, label and rejection wording
+    must use it (issue #27).
+    """
+
+    def test_the_constant_uses_the_approved_term(self):
+        from screener.score_wallets import MODELLED_COPY_PNL_MIN_USD
+
+        self.assertEqual(MODELLED_COPY_PNL_MIN_USD, 0.0)
+        with self.assertRaises(ImportError):
+            from screener.score_wallets import BACKTEST_COPY_PNL_MIN_USD  # noqa: F401
+
+    def test_the_rejection_wording_uses_the_approved_term(self):
+        metrics = {"polycop_site_score": 75.0, "actual_pnl": 1000.0, "copy_pnl": -50.0}
+        res = calculate_bankroll_optimized_score(metrics)
+        self.assertTrue(any("Modelled Copy PnL" in r for r in res["rejection_reasons"]))
+        self.assertFalse(any("Backtest" in r for r in res["rejection_reasons"]))
+
+
 class TestScaleIsIntact(unittest.TestCase):
     def test_a_fully_measured_ideal_wallet_scores_one_hundred(self):
         from execution.copy_execution_profile import CURRENT_PROFILE

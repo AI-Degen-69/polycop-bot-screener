@@ -20,7 +20,7 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 | Gate | Condition | Why |
 | :--- | :--- | :--- |
 | PolyCop Site Score sanity floor | `< 40 / 100` | stops manually pasted garbage from being scored once the leaderboard pre-filter is gone |
-| Toxic Copy Poison | `Copy PnL < $0` | a modelled copy that loses money is not a target |
+| Toxic Copy Poison | `Modelled Copy PnL < $0` | a modelled copy that loses money is not a target |
 | Slippage Cost Rate | `> 5.0% modelled` | roughly 21% real under the Friction Realism Multiplier (ADR 0001) |
 | Hedged Rate | `> 3.0%` | market-making signature and doubled friction legs |
 | Profit/Loss Ratio | `< 0.3` | winning pennies, losing dollars |

@@ -448,7 +448,7 @@ function renderGrid() {
                 </div>
                 <div class="card-metrics-summary">
                     <div class="summary-cell">
-                        <span class="summary-lbl">Backtest Copy PnL</span>
+                        <span class="summary-lbl">Modelled Copy PnL</span>
                         <span class="summary-val" style="color: ${t.metrics.copy_pnl >= 0 ? '#10b981' : '#ef4444'}">
                             $${t.metrics.copy_pnl.toLocaleString('en-US', {minimumFractionDigits: 2})}
                         </span>
