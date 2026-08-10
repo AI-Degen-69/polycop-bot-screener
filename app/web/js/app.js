@@ -103,15 +103,20 @@ function renderProvenanceBanner(data) {
 
     if (data.reduced_confidence) {
         banner.className = "provenance-banner degraded";
+        // A degraded scan can be partial: wallets simulated before the outage
+        // keep their verdicts, and only the unreached ones fall back to triage
+        // order. The banner must not tell a reader that no tier on the page is
+        // simulated when some are.
+        const anySimulated = (data.simulated_targets || []).some(t => t.verdict_source === "simulation");
+        const headline = anySimulated
+            ? "⚠️ Simulation interrupted — some wallets are triage order only"
+            : "⚠️ Showing triage order, not simulated results";
+        const detail = anySimulated
+            ? `The endpoint stopped answering mid-scan${data.fallback_reason ? `: ${data.fallback_reason}` : ""}. Wallets simulated before the outage keep their verdicts; the rest are ordered by Copyability Score, which triages candidates but is not a verdict.`
+            : `The simulation could not run${data.fallback_reason ? `: ${data.fallback_reason}` : ""}. Wallets below are ordered by Copyability Score, which triages candidates but is not a verdict. No Tier on this page was produced by a simulation.`;
         banner.innerHTML = `
-            <div class="provenance-headline">
-                ⚠️ Showing triage order, not simulated results
-            </div>
-            <div class="provenance-detail">
-                The simulation could not run${data.fallback_reason ? `: ${data.fallback_reason}` : ""}.
-                Wallets below are ordered by Copyability Score, which triages candidates
-                but is not a verdict. No Tier on this page was produced by a simulation.
-            </div>
+            <div class="provenance-headline">${headline}</div>
+            <div class="provenance-detail">${detail}</div>
             ${profileLine}
         `;
     } else {

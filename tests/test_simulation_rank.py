@@ -69,6 +69,8 @@ def test_scan_rank_is_stamped_from_the_final_ordering():
         ],
         profile=CURRENT_PROFILE,
         fetcher=failing_fetcher,
+        # Every wallet failing counts as an outage for this dead-endpoint test.
+        endpoint_failure_threshold=1,
     )
     assert [r["address"] for r in degraded["simulated_targets"]] == ["0x2222", "0x1111"]
     assert [r["scan_rank"] for r in degraded["simulated_targets"]] == [1, 2]
@@ -127,7 +129,13 @@ def test_simulation_rank_endpoint_failure_fallback():
     def failing_fetcher(payload):
         raise RuntimeError("Network down")
 
-    out = run_phase3_simulation_rank(targets=sample_targets, profile=CURRENT_PROFILE, fetcher=failing_fetcher)
+    out = run_phase3_simulation_rank(
+        targets=sample_targets,
+        profile=CURRENT_PROFILE,
+        fetcher=failing_fetcher,
+        # Every wallet failing counts as an outage for this dead-endpoint test.
+        endpoint_failure_threshold=1,
+    )
 
     assert out["reduced_confidence"] is True
     assert out["fallback_reason"] == "Endpoint unavailable: Network down"
@@ -170,7 +178,10 @@ def test_a_degraded_run_never_presents_a_triage_grade_as_a_simulated_tier():
         raise RuntimeError("Network down")
 
     out = run_phase3_simulation_rank(
-        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=failing_fetcher
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=failing_fetcher,
+        endpoint_failure_threshold=1,
     )
     row = out["simulated_targets"][0]
 
@@ -233,7 +244,10 @@ def test_a_degraded_run_publishes_no_window_share():
         raise RuntimeError("Network down")
 
     out = run_phase3_simulation_rank(
-        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=failing_fetcher
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=failing_fetcher,
+        endpoint_failure_threshold=1,
     )
     row = out["simulated_targets"][0]
 
@@ -253,7 +267,10 @@ def test_the_feed_carries_what_the_page_needs_from_triage(fetcher_name):
 
     fetcher = _ok_fetcher if fetcher_name == "ok" else failing_fetcher
     out = run_phase3_simulation_rank(
-        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=fetcher
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=fetcher,
+        endpoint_failure_threshold=1,
     )
     row = out["simulated_targets"][0]
 
@@ -262,6 +279,163 @@ def test_the_feed_carries_what_the_page_needs_from_triage(fetcher_name):
         assert field in row, f"{field} was dropped, so the page loses it"
     assert row["activity"]["trades_7d"] == 12
     assert row["bankroll_analysis"]["min_target_order_floor_usd"] == 8.33
+
+
+def test_one_transient_endpoint_failure_keeps_the_rest_of_the_scan():
+    """Issue #25's core: a single wallet the endpoint did not answer for is
+    rejected honestly (ADR 0007) while the scan continues — one flaky request
+    no longer throws the whole scan's simulation work away.
+    """
+    def flaky_fetcher(payload):
+        if payload["wallet"] == "0x2222":
+            raise RuntimeError("Transient network blip")
+        return _ok_fetcher(payload)
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111"), _triage_target("0x2222"), _triage_target("0x3333")],
+        profile=CURRENT_PROFILE,
+        fetcher=flaky_fetcher,
+    )
+
+    assert out["reduced_confidence"] is False
+    # 0x2222 was dropped (endpoint-failure rejection); the other two keep
+    # simulated verdicts.
+    assert [t["address"] for t in out["simulated_targets"]] == ["0x1111", "0x3333"]
+    assert all(t["verdict_source"] == "simulation" for t in out["simulated_targets"])
+
+
+def test_a_sustained_failure_streak_degrades_but_keeps_prior_verdicts():
+    """Once consecutive endpoint failures cross the threshold, the scan stops
+    and the unreached wallets fall back to triage order — but the verdicts
+    already computed are published, not thrown away.
+    """
+    def partially_dead_fetcher(payload):
+        if payload["wallet"] in ("0x1111", "0x2222"):
+            return _ok_fetcher(payload)
+        raise RuntimeError("Network down")
+
+    out = run_phase3_simulation_rank(
+        targets=[
+            _triage_target("0x1111"),
+            _triage_target("0x2222"),
+            _triage_target("0x3333"),
+            _triage_target("0x4444"),
+        ],
+        profile=CURRENT_PROFILE,
+        fetcher=partially_dead_fetcher,
+        # The first failure (0x3333) is a flake and the scan continues; the
+        # second consecutive one (0x4444) crosses the threshold.
+        endpoint_failure_threshold=2,
+    )
+
+    assert out["reduced_confidence"] is True
+    assert out["fallback_reason"] == "Endpoint unavailable: Network down"
+    # 0x1111 and 0x2222 keep simulated verdicts; 0x4444 (never reached) falls
+    # back to triage. 0x3333 was reached and endpoint-rejected, so it is not
+    # in the feed at all.
+    assert [t["address"] for t in out["simulated_targets"]] == ["0x1111", "0x2222", "0x4444"]
+    assert [t["verdict_source"] for t in out["simulated_targets"]] == ["simulation", "simulation", "triage"]
+    assert out["simulated_targets"][2]["tier"] is None
+
+
+def test_a_measured_rejection_is_not_an_outage_signal():
+    """A wallet that measured a non-positive PnL is a normal rejection, not an
+    endpoint failure — it must reset the failure streak, never trigger it.
+    """
+    def fetcher(payload):
+        if payload["wallet"] in ("0x1111", "0x4444"):
+            raise RuntimeError("Network down")
+        if payload["wallet"] == "0x2222":
+            # Genuine measured loss at 10%: the endpoint answered.
+            return {
+                "sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else -5.0,
+                "target_total_pnl": 500.0,
+                "logs": [{"type": "INTERCEPT"}],
+            }
+        return _ok_fetcher(payload)
+
+    out = run_phase3_simulation_rank(
+        targets=[
+            _triage_target("0x1111"),
+            _triage_target("0x2222"),
+            _triage_target("0x3333"),
+            _triage_target("0x4444"),
+        ],
+        profile=CURRENT_PROFILE,
+        fetcher=fetcher,
+        endpoint_failure_threshold=2,
+    )
+
+    # The streak is 0x1111 (failure), then reset by 0x2222's measured
+    # rejection, then 0x4444's single failure — never two consecutive, so the
+    # scan never degrades.
+    assert out["reduced_confidence"] is False
+    assert [t["address"] for t in out["simulated_targets"]] == ["0x3333"]
+
+
+def test_the_feed_publishes_none_at_a_failed_non_gated_level():
+    """ADR 0007 consequence: a failed non-gated level is a visible `None` gap
+    in the published decay curve — it neither rejects the wallet nor degrades
+    the scan.
+    """
+    def fetcher(payload):
+        if payload["slippage"] == 5.0:
+            raise RuntimeError("Network down")
+        return _ok_fetcher(payload)
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "simulation"
+    assert row["pnl_by_slippage_level"][5.0] is None
+    assert row["pnl_by_slippage_level"][10.0] == 80.0
+
+
+def test_a_sweep_exception_counts_toward_the_failure_streak(monkeypatch):
+    """A sweep that raises (an unexpected error, not a failed fetch) is the
+    same endpoint signal: it counts toward the outage streak and formats the
+    fallback reason.
+    """
+    import pipeline.phase3_simulation_rank as phase3
+
+    def exploding_sweep(wallet, **kwargs):
+        raise RuntimeError("Boom")
+
+    monkeypatch.setattr(phase3, "run_slippage_sensitivity_sweep", exploding_sweep)
+
+    out = phase3.run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111"), _triage_target("0x2222")],
+        profile=CURRENT_PROFILE,
+        fetcher=_ok_fetcher,
+        endpoint_failure_threshold=1,
+    )
+
+    assert out["reduced_confidence"] is True
+    assert out["fallback_reason"] == "Endpoint unavailable: Boom"
+    # Neither wallet was simulated; both fall back to triage ordering.
+    assert [t["verdict_source"] for t in out["simulated_targets"]] == ["triage", "triage"]
+
+
+def test_a_recovered_flake_publishes_no_fallback_reason():
+    """A failure that never becomes a streak is a flake: the scan does not
+    degrade and the summary carries no fallback reason.
+    """
+    def flaky_fetcher(payload):
+        if payload["wallet"] == "0x1111":
+            raise RuntimeError("Transient blip")
+        return _ok_fetcher(payload)
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111"), _triage_target("0x2222")],
+        profile=CURRENT_PROFILE,
+        fetcher=flaky_fetcher,
+        endpoint_failure_threshold=3,
+    )
+
+    assert out["reduced_confidence"] is False
+    assert out["fallback_reason"] is None
 
 
 def _fetcher_with_market_stats(market_stats):
