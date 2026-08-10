@@ -15,11 +15,11 @@ if SRC_DIR not in sys.path:
 try:
     from execution.copy_execution_profile import CURRENT_PROFILE
     from screener.slippage_sweep import run_slippage_sensitivity_sweep
-    from pipeline.run_mock_client import parse_run_mock_response, calculate_copyable_window_share
+    from pipeline.run_mock_client import calculate_copyable_window_share
 except ModuleNotFoundError:
     from app.src.execution.copy_execution_profile import CURRENT_PROFILE
     from app.src.screener.slippage_sweep import run_slippage_sensitivity_sweep
-    from app.src.pipeline.run_mock_client import parse_run_mock_response, calculate_copyable_window_share
+    from app.src.pipeline.run_mock_client import calculate_copyable_window_share
 
 def assign_simulated_tier(edge_retention: Optional[float], sim_pnl_10: float) -> str:
     """
@@ -37,6 +37,61 @@ def assign_simulated_tier(edge_retention: Optional[float], sim_pnl_10: float) ->
         return "C-Tier (High Risk / Volatile)"
     else:
         return "F-Tier / REJECT"
+
+def extract_balance_miss(sweep_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The per-market record of trades the bankroll could not fund.
+
+    Balance Miss lives on `market_stats`, one entry per market, as
+    `sim_missed_amount`. The decision `logs` are a different array answering a
+    different question — why a trade was filtered out, not whether the money
+    ran out — so reading the miss off them yields nothing at all.
+
+    Markets that funded everything carry a zero and are dropped here, so an
+    empty list is the honest signal that nothing was missed. No captured
+    response pins the market label yet, so the usual candidates are tried in
+    turn rather than one being assumed.
+    """
+    entries = []
+    for market in sweep_data.get("market_stats") or []:
+        try:
+            amount = float(market.get("sim_missed_amount", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        label = (
+            market.get("title")
+            or market.get("market")
+            or market.get("question")
+            or market.get("slug")
+            or "Unnamed market"
+        )
+        entries.append({"market": label, "amount": round(amount, 2)})
+    entries.sort(key=lambda item: item["amount"], reverse=True)
+    return entries
+
+
+def _carry_through_triage(target: Dict[str, Any]) -> Dict[str, Any]:
+    """Everything triage already established about a wallet, passed along intact.
+
+    Phase 3 publishes the feed the web app reads, so anything it drops here
+    disappears from the page. Activity, the score breakdown and the bankroll
+    analysis are all triage's work and none of them is invalidated by running a
+    simulation on top, so they travel with the row rather than forcing the page
+    to fetch and join two files.
+    """
+    return {
+        "address": target.get("address"),
+        "name": target.get("name"),
+        "triage_copyability_score": target.get("final_score"),
+        "triage_grade": target.get("grade"),
+        "is_hidden_gem": target.get("is_hidden_gem"),
+        "activity": target.get("activity"),
+        "breakdown": target.get("breakdown"),
+        "bankroll_analysis": target.get("bankroll_analysis"),
+        "metrics": target.get("metrics"),
+    }
+
 
 def run_phase3_simulation_rank(
     targets: Optional[List[Dict[str, Any]]] = None,
@@ -99,35 +154,42 @@ def run_phase3_simulation_rank(
 
         # Extract per-market detail & balance miss from 10% slippage run
         res_10 = sweep_out.get("sweep_results", {}).get(10.0, {}).get("data", {})
-        parsed_10 = parse_run_mock_response(res_10) if res_10 else {}
         window_share = calculate_copyable_window_share(res_10) if res_10 else None
 
-        entry = {
-            "address": addr,
-            "name": target.get("name"),
-            "triage_copyability_score": target.get("final_score"),
+        entry = _carry_through_triage(target)
+        entry.update({
+            # The tier a simulation produced, labelled as such. A reader cannot
+            # tell a simulated verdict from a triage grade by looking at the
+            # letter, so the provenance travels beside it rather than being
+            # inferred from which fields happen to be populated.
+            "verdict_source": "simulation",
+            "tier": sim_tier,
             "edge_retention": round(retention, 4) if retention is not None else None,
-            "simulated_tier": sim_tier,
             "simulated_copy_pnl_10": round(pnl_10, 2),
             "copyable_window_share": round(window_share, 4) if window_share is not None else None,
-            "balance_miss_details": parsed_10.get("logs", []),
+            "balance_miss_details": extract_balance_miss(res_10),
             "pnl_by_slippage_level": sweep_out.get("pnl_by_level"),
-            "metrics": target.get("metrics")
-        }
+        })
         simulated_results.append(entry)
 
     # Error Fallback: if endpoint failed, fall back to triage copyability score ordering
     if reduced_confidence:
         simulated_results = []
         for target in targets:
-            entry = {
-                "address": target.get("address"),
-                "name": target.get("name"),
-                "triage_copyability_score": target.get("final_score"),
+            entry = _carry_through_triage(target)
+            entry.update({
+                # No simulation ran, so there is no simulated tier. The triage
+                # grade is still here under its own name; presenting it as a
+                # simulated verdict would be the same letter meaning something
+                # weaker, which is exactly the confusion this feed must not ship.
+                "verdict_source": "triage",
+                "tier": None,
                 "edge_retention": None,
-                "simulated_tier": target.get("grade"),
-                "metrics": target.get("metrics")
-            }
+                "simulated_copy_pnl_10": None,
+                "copyable_window_share": None,
+                "balance_miss_details": [],
+                "pnl_by_slippage_level": None,
+            })
             simulated_results.append(entry)
         simulated_results.sort(key=lambda x: x.get("triage_copyability_score", 0.0), reverse=True)
     else:

@@ -14,13 +14,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(SCRIPT_DIR, "app")
 SRC_DIR = os.path.join(APP_DIR, "src")
 DATA_DIR = os.path.join(APP_DIR, "data")
-VERIFIED_DATA_FILE = os.path.join(DATA_DIR, "phase2_verified_targets.json")
+# The page renders the simulation feed, so that is the file whose absence means
+# the pipeline has not run — not the triage feed it is built from.
+VERIFIED_DATA_FILE = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
 
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from pipeline.phase1_scrape_leaderboard import fetch_and_scrape_leaderboard
 from pipeline.phase2_filter_targets import run_phase2_filter
+from pipeline.phase3_simulation_rank import run_phase3_simulation_rank
 from server.serve_web_app import start_server, PORT
 
 def main():
@@ -39,6 +42,7 @@ def main():
         print("\n[PIPELINE] Dataset missing or rescan requested. Running pipeline...")
         fetch_and_scrape_leaderboard()
         run_phase2_filter()
+        run_phase3_simulation_rank()
     else:
         print(f"\n[PIPELINE] Verified dataset found: {VERIFIED_DATA_FILE}")
 
