@@ -76,10 +76,24 @@ class TestCopyableTradeWindow(unittest.TestCase):
         self.assertAlmostEqual(doubled.window_min_usd, 16.67, places=2)
         self.assertAlmostEqual(doubled.window_max_usd, 83.33, places=2)
 
-    def test_a_raised_per_token_cap_widens_only_the_upper_bound(self):
-        wider = CopyExecutionProfile(per_token_cap_usd=10.0)
-        self.assertAlmostEqual(wider.window_min_usd, CURRENT_PROFILE.window_min_usd, places=2)
-        self.assertAlmostEqual(wider.window_max_usd, 333.33, places=2)
+    def test_raising_a_cap_that_is_not_binding_widens_nothing(self):
+        # The 5% bankroll rule already caps a position at $5.00, so doubling the
+        # per-token cap admits no larger a copy order and no wider a window.
+        wider_cap = CopyExecutionProfile(per_token_cap_usd=10.0)
+        self.assertAlmostEqual(wider_cap.window_min_usd, CURRENT_PROFILE.window_min_usd, places=2)
+        self.assertAlmostEqual(wider_cap.window_max_usd, CURRENT_PROFILE.window_max_usd, places=2)
+
+    def test_the_upper_bound_follows_whichever_cap_binds(self):
+        # Lift both the per-token cap and the bankroll share, and the window moves.
+        lifted = CopyExecutionProfile(per_token_cap_usd=10.0, max_position_bankroll_fraction=0.10)
+        self.assertAlmostEqual(lifted.max_single_position_usd, 10.00, places=2)
+        self.assertAlmostEqual(lifted.window_max_usd, 333.33, places=2)
+
+    def test_a_small_bankroll_narrows_the_window_it_can_actually_mirror(self):
+        # A $50 bankroll caps a position at $2.50, so it cannot mirror a $166 trade
+        # at the nominal ratio however high the per-token cap is set.
+        small = CopyExecutionProfile(bankroll_usd=50.0)
+        self.assertAlmostEqual(small.window_max_usd, 83.33, places=2)
 
 
 class TestProfileDerivedSizing(unittest.TestCase):
@@ -110,6 +124,15 @@ class TestProfileDerivedSizing(unittest.TestCase):
         self.assertEqual(CURRENT_PROFILE.global_cap_usd, 100.0)
         self.assertEqual(CURRENT_PROFILE.min_price, 0.05)
         self.assertEqual(CURRENT_PROFILE.max_price, 0.95)
+
+    def test_a_profile_with_no_copy_ratio_is_refused_at_construction(self):
+        # Rather than raising ZeroDivisionError deep inside the window derivation.
+        with self.assertRaises(ValueError):
+            CopyExecutionProfile(copy_ratio=0.0)
+
+    def test_a_profile_with_no_sizing_peak_is_refused_at_construction(self):
+        with self.assertRaises(ValueError):
+            CopyExecutionProfile(sizing_fit_peak_usd=0.0)
 
     def test_a_profile_cannot_be_mutated_after_construction(self):
         # Results are labelled with a fingerprint; a mutable profile would let the

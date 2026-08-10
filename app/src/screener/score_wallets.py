@@ -162,6 +162,10 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     sizing_peak = profile.sizing_fit_peak_usd
     if avg_inv <= sizing_peak:
         inv_score = 5.0 * max(0.0, avg_inv / sizing_peak)
+    elif sizing_peak >= WHALE_AVG_INVEST_LIMIT_USD:
+        # A peak at or past the whale gate leaves no room to slope down: everything
+        # above it is rejected anyway.
+        inv_score = 0.0
     else:
         inv_score = max(0.0, 5.0 * (1.0 - ((avg_inv - sizing_peak) / (WHALE_AVG_INVEST_LIMIT_USD - sizing_peak))))
     score += inv_score

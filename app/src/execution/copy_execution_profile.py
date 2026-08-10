@@ -46,13 +46,31 @@ class CopyExecutionProfile:
     # equals the nominal one.
     sizing_fit_peak_usd: float = 25.0
 
+    def __post_init__(self):
+        """Reject a profile whose derived quantities would be undefined.
+
+        The profile is edited by hand to match the bot's settings, so a typo here
+        would otherwise surface as a ZeroDivisionError deep inside scoring.
+        """
+        if self.copy_ratio <= 0:
+            raise ValueError(f"copy_ratio must be positive, got {self.copy_ratio}")
+        if self.sizing_fit_peak_usd <= 0:
+            raise ValueError(
+                f"sizing_fit_peak_usd must be positive, got {self.sizing_fit_peak_usd}"
+            )
+
     @property
     def max_single_position_usd(self) -> float:
-        """The most the bot will hold in any one position."""
+        """The most the bot will hold in any one position.
+
+        Whichever cap binds first: the bankroll share, the per-token cap, or the
+        global cap, since no single position can exceed the total deployment limit.
+        """
         return round(
             min(
                 self.bankroll_usd * self.max_position_bankroll_fraction,
                 self.per_token_cap_usd,
+                self.global_cap_usd,
             ),
             2,
         )
@@ -75,10 +93,12 @@ class CopyExecutionProfile:
     def window_max_usd(self) -> float:
         """Upper bound of the Copyable Trade Window.
 
-        Above it the per-token cap clips the copy order, so the realised copy ratio
-        falls below the nominal one.
+        Above it the position cap clips the copy order, so the realised copy ratio
+        falls below the nominal one. Read from the effective cap rather than from
+        the per-token cap alone: raising a cap that is not the one binding widens
+        nothing.
         """
-        return self.per_token_cap_usd / self.copy_ratio
+        return self.max_single_position_usd / self.copy_ratio
 
     def min_target_order_floor_usd(self, target_avg_invest_usd: float) -> float:
         """The smallest order from this target that the follower can still mirror.
@@ -103,10 +123,12 @@ class CopyExecutionProfile:
 
         Every field participates, so a settings change misses cache rather than
         serving a verdict computed under a profile that no longer exists. It is a
-        content hash rather than `hash()` so that it holds across processes.
+        content hash rather than `hash()` so that it holds across processes, and
+        the full digest rather than a prefix, because a collision would silently
+        serve one profile's cached verdict under another's settings.
         """
         canonical = json.dumps(self.as_dict(), sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def with_bankroll(self, bankroll_usd: float) -> "CopyExecutionProfile":
         """The same settings sized to a different bankroll."""

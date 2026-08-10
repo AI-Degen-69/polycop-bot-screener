@@ -124,6 +124,9 @@ def run_phase2_filter(profile=CURRENT_PROFILE):
 
     summary_data = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        # A score is valid only for one Copy Execution Profile, so the file states
+        # which one produced it rather than leaving a later reader to guess.
+        "copy_execution_profile": dict(profile.as_dict(), fingerprint=profile.fingerprint),
         "total_scraped_profiles": len(raw_profiles),
         "rejected_disqualified_count": rejected_count,
         "total_verified_targets": len(verified_targets),
