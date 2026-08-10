@@ -35,6 +35,21 @@ class TestDrawdownDepth(unittest.TestCase):
         curve = [0, 100, 200, 50, 120, 110]
         self.assertAlmostEqual(calculate_drawdown_depth(json.dumps(curve)), 0.75)
 
+    def test_a_fall_is_measured_against_the_peak_it_fell_from(self):
+        # Halving from 1000 is a 50% fall even though the curve later doubles.
+        # Dividing by the final, larger peak would report 25% and score it well.
+        curve = [0, 1000, 500, 600, 1500, 2000]
+        self.assertAlmostEqual(calculate_drawdown_depth(json.dumps(curve)), 0.50)
+
+    def test_losing_more_than_the_peak_is_reported_as_total(self):
+        # A curve that runs below zero can fall further than it ever rose.
+        curve = [0, 100, 50, -100, -200, -50]
+        self.assertAlmostEqual(calculate_drawdown_depth(json.dumps(curve)), 1.0)
+
+    def test_ignores_the_stretch_before_the_curve_turns_positive(self):
+        curve = [0, -50, -20, 100, 40, 120]
+        self.assertAlmostEqual(calculate_drawdown_depth(json.dumps(curve)), 0.60)
+
     def test_returns_none_when_the_curve_is_absent_or_too_short(self):
         self.assertIsNone(calculate_drawdown_depth(None))
         self.assertIsNone(calculate_drawdown_depth(""))

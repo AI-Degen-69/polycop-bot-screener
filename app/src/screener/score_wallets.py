@@ -87,7 +87,9 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     pl_ratio = float(metrics.get("pl_ratio", 0.0))
     r20_wr = float(metrics.get("r20_win_rate", 0.0))
     r20_pnl = float(metrics.get("r20_pnl", 0.0))
-    r20_slip = float(metrics.get("r20_slip", 100.0))
+    # Unmeasured slip is not frictionless slip. A missing value here used to
+    # arrive as zero from the pipeline, which is the best possible reading.
+    r20_slip = _measured(metrics.get("r20_slip"))
     pnl_vol = float(metrics.get("pnl_vol_ratio", 0.0))
     mkts = float(metrics.get("markets", 0))
     avg_inv = float(metrics.get("avg_invest", 0.0))
@@ -96,7 +98,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     # them can be unavailable. None means unmeasured and scores nothing: a
     # default would hand out points the wallet never earned, which is exactly
     # how a previous version of this engine gave every candidate a free 44.
-    drawdown_depth = _measured(metrics.get("drawdown_depth", metrics.get("max_drawdown")))
+    drawdown_depth = _measured(metrics.get("drawdown_depth"))
     window_share = _measured(metrics.get("copyable_window_share"))
     edge_to_friction = _measured(metrics.get("edge_to_friction"))
     daily_green_rate = _measured(metrics.get("days_win_rate"))
@@ -162,7 +164,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     breakdown["4. Copyable Window Share (10%)"] = round(cws_score, 2)
 
     # 5. Recent Form (10 pts) - recent profit judged against the friction it came through
-    if r20_pnl <= 0:
+    if r20_pnl <= 0 or r20_slip is None:
         rf_score = 0.0
     else:
         slip_factor = 1.0 - (min(max(r20_slip, 0.0), RECENT_FORM_SLIP_CEILING_PCT)

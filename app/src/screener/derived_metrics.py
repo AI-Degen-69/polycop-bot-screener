@@ -45,17 +45,25 @@ def calculate_drawdown_depth(all_pnl_json: Any) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
+    # Each fall is measured against the peak it fell from, not against the
+    # highest point the curve ever reached. A wallet that halved and then went
+    # on to new highs still halved, and a follower who was there at the time
+    # experienced that, not the smaller share of a later, larger peak.
     peak = values[0]
-    deepest = 0.0
+    deepest = None
     for value in values:
         peak = max(peak, value)
-        deepest = max(deepest, peak - value)
+        if peak <= 0:
+            # Before the curve turns positive there is no peak to fall from.
+            continue
+        fall = (peak - value) / peak
+        deepest = fall if deepest is None else max(deepest, fall)
 
-    highest = max(values)
-    if highest <= 0:
-        # A share of a non-positive peak says nothing about how far the wallet fell.
+    if deepest is None:
         return None
-    return deepest / highest
+    # A curve that runs below zero can fall by more than its peak. Losing
+    # everything is the floor of what this parameter can express.
+    return min(deepest, 1.0)
 
 
 def calculate_daily_green_rate(daily_stats_json: Any) -> Tuple[Optional[float], int]:

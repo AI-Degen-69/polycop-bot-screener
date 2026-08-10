@@ -23,6 +23,21 @@ from screener.derived_metrics import (
     calculate_edge_to_friction,
 )
 
+def _optional_float(value):
+    """A leaderboard figure that was present, or None if it was not.
+
+    Coercing an absent figure to zero is not neutral: for a cost, zero is the
+    best possible reading, and the engine would score the wallet as though it
+    traded without friction.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
     """
     Phase 2: Takes raw scraped profiles from app/data/phase1_scraped_wallets.json,
@@ -87,7 +102,7 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
             "observed_days": observed_days,
             "r20_win_rate": float(p.get("r20_wr", p.get("recent_20_win_rate", p.get("r20_win_rate", 0.0)))),
             "r20_pnl": float(p.get("r20_pnl", p.get("recent_20_pnl", 0.0))),
-            "r20_slip": float(p.get("r20_slip", p.get("recent_20_slippage", 0.0))),
+            "r20_slip": _optional_float(p.get("r20_slip", p.get("recent_20_slippage"))),
             "pnl_vol_ratio": pnl_vol_ratio,
             "avg_invest": float(p.get("avg_invest", 0.0)),
             "markets": int(p.get("markets_traded", p.get("markets", 0))),
@@ -133,7 +148,7 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
                 "avg_invest": round(raw_metrics["avg_invest"], 2),
                 "markets": raw_metrics["markets"],
                 "r20_pnl": round(raw_metrics["r20_pnl"], 2),
-                "r20_slip": round(raw_metrics["r20_slip"], 2),
+                "r20_slip": round(raw_metrics["r20_slip"], 2) if raw_metrics["r20_slip"] is not None else None,
                 "buy_price": round(raw_metrics["buy_price"], 4)
             },
             "activity": compute_activity(p, now=scrape_now),

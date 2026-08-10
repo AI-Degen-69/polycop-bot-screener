@@ -115,6 +115,46 @@ class TestMeasuredParametersReachTheEngine(unittest.TestCase):
         self.assertAlmostEqual(self.target["metrics"]["days_win_rate"], 83.33, places=1)
 
 
+class TestWindowShareReachesTheEngineWhenSimulated(unittest.TestCase):
+    """The other three parameters have source data on every wallet; this one
+    only exists once a Simulated Copy Run has produced decision logs. Without a
+    positive case, a wiring error that never yields a value looks identical to a
+    wallet that legitimately has none."""
+
+    def setUp(self):
+        simulated = _profile(
+            "0xsimulated",
+            run_mock_response={
+                "sim_total_pnl": 240.0,
+                "logs": (
+                    [{"type": "INTERCEPT"}] * 6
+                    + [{"type": "SKIP_FILTER"}] * 3
+                    + [{"type": "SKIP_CAP"}]
+                ),
+            },
+        )
+        out = _run([simulated])
+        self.assertEqual(len(out["verified_targets"]), 1, "fixture wallet was rejected")
+        self.target = out["verified_targets"][0]
+
+    def test_the_decision_logs_produce_a_measured_window_share(self):
+        self.assertAlmostEqual(self.target["copyable_window_share"], 0.6, places=4)
+
+    def test_the_measured_share_is_scored(self):
+        # Six of ten decisions were copyable, so six of ten points.
+        self.assertAlmostEqual(_points(self.target, "Copyable Window Share"), 6.0, places=2)
+
+
+class TestRecentFormWillNotAssumeFrictionlessExecution(unittest.TestCase):
+    def test_a_wallet_with_no_slip_figure_scores_nothing_for_recent_form(self):
+        # An absent cost used to arrive as zero, which is the best possible
+        # reading, so profit earned through unknown friction scored full marks.
+        blind = _profile("0xnoslip", r20_slip=None)
+        target = _run([blind])["verified_targets"][0]
+        self.assertIsNone(target["metrics"]["r20_slip"])
+        self.assertEqual(_points(target, "Recent Form"), 0.0)
+
+
 class TestUnmeasurableWalletsScoreNothing(unittest.TestCase):
     """The regression guard: a wallet with no source series must not score well."""
 
