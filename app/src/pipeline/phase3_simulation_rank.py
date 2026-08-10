@@ -12,28 +12,28 @@ DATA_DIR = os.path.join(APP_DIR, "data")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-try:
-    from execution.copy_execution_profile import CURRENT_PROFILE
-    from screener.slippage_sweep import run_slippage_sensitivity_sweep
-    from pipeline.run_mock_client import calculate_copyable_window_share
-except ModuleNotFoundError:
-    from app.src.execution.copy_execution_profile import CURRENT_PROFILE
-    from app.src.screener.slippage_sweep import run_slippage_sensitivity_sweep
-    from app.src.pipeline.run_mock_client import calculate_copyable_window_share
+from execution.copy_execution_profile import CURRENT_PROFILE
+from screener.simulated_copy_run import calculate_copyable_window_share
+from screener.score_wallets import SIM_TIER_A_MIN, SIM_TIER_B_MIN, SIM_TIER_C_MIN, SIM_TIER_S_MIN
+from screener.slippage_sweep import run_slippage_sensitivity_sweep
 
 def assign_simulated_tier(edge_retention: Optional[float], sim_pnl_10: float) -> str:
     """
     Assign Tier based on simulated edge retention performance.
+
+    Bands come from the same constants that generate the docs (SCORING_SPEC
+    "sim_tiers"), so the verdict shown on the page cannot drift from what the
+    documentation says. See ADR 0002.
     """
     if edge_retention is None or sim_pnl_10 <= 0:
         return "F-Tier / REJECT"
-    if edge_retention >= 0.85:
+    if edge_retention >= SIM_TIER_S_MIN:
         return "S-Tier (God-Tier Target)"
-    elif edge_retention >= 0.70:
+    elif edge_retention >= SIM_TIER_A_MIN:
         return "A-Tier (Strong Copy Target)"
-    elif edge_retention >= 0.50:
+    elif edge_retention >= SIM_TIER_B_MIN:
         return "B-Tier (Moderate Copy Target)"
-    elif edge_retention >= 0.30:
+    elif edge_retention >= SIM_TIER_C_MIN:
         return "C-Tier (High Risk / Volatile)"
     else:
         return "F-Tier / REJECT"
@@ -88,6 +88,9 @@ def _carry_through_triage(target: Dict[str, Any]) -> Dict[str, Any]:
         "is_hidden_gem": target.get("is_hidden_gem"),
         "activity": target.get("activity"),
         "breakdown": target.get("breakdown"),
+        "breakdown_labels": target.get("breakdown_labels"),
+        "radar_labels": target.get("radar_labels"),
+        "breakdown_points": target.get("breakdown_points"),
         "bankroll_analysis": target.get("bankroll_analysis"),
         "metrics": target.get("metrics"),
     }
@@ -108,7 +111,13 @@ def run_phase3_simulation_rank(
     if profile is None:
         profile = CURRENT_PROFILE
 
-    if targets is None:
+    # Whether this run is the production path, decided before `targets` is
+    # filled in from the Phase 2 file. Asking `targets is None` after that
+    # point answers "did the file happen to be empty", not "who supplied the
+    # targets", and the two diverge on exactly the run that publishes.
+    publishes_feed = targets is None
+
+    if publishes_feed:
         in_file = os.path.join(DATA_DIR, "phase2_verified_targets.json")
         if os.path.exists(in_file):
             with open(in_file, "r", encoding="utf-8") as f:
@@ -196,6 +205,13 @@ def run_phase3_simulation_rank(
         # Rank survivors by Edge Retention descending
         simulated_results.sort(key=lambda x: (x.get("edge_retention") or 0.0, x.get("triage_copyability_score") or 0.0), reverse=True)
 
+    # The rank a wallet holds within this scan, read off the final ordering
+    # (1-based). It travels beside the tier so a reader sees both where a wallet
+    # sits and why it sits there. Stamped after sorting so it always reflects
+    # the ordering the feed actually ships, whichever branch produced it.
+    for index, entry in enumerate(simulated_results, start=1):
+        entry["scan_rank"] = index
+
     summary = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "copy_execution_profile": dict(profile.as_dict(), fingerprint=profile.fingerprint),
@@ -206,12 +222,27 @@ def run_phase3_simulation_rank(
         "simulated_targets": simulated_results
     }
 
-    out_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
-    try:
-        with open(out_file, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-    except Exception:
-        pass
+    # The feed the web app serves is written only on the production path
+    # (targets read from the Phase 2 file). Runs that were handed explicit
+    # targets — every test in this repo — must not touch the live data dir;
+    # an earlier version wrote unconditionally and every test-suite run
+    # clobbered the feed with fixture wallets.
+    if publishes_feed:
+        out_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+        # Written beside the feed and moved onto it, so a reader never sees a
+        # half-written scan: the web app polls this file while scans run. A
+        # failure here is raised rather than swallowed — a scan that could not
+        # publish has not succeeded, and the silence of the earlier version is
+        # what let a broken publish path go unnoticed through a whole day of
+        # scans that looked like they had worked.
+        tmp_file = out_file + ".tmp"
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2)
+            os.replace(tmp_file, out_file)
+        finally:
+            if os.path.exists(tmp_file):
+                os.remove(tmp_file)
 
     return summary
 

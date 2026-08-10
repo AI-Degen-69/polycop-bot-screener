@@ -86,7 +86,7 @@
                         </div>
                         <div class="stat-pill">
                             <div class="val" id="statSTier">0</div>
-                            <div class="lbl">S-Tier (≥90)</div>
+                            <div class="lbl">S-Tier (≥72)</div>
                         </div>
                         <div class="stat-pill stat-pill-gem">
                             <div class="val" id="statGems">0</div>
@@ -113,7 +113,7 @@
                             <span class="gem-info-bubble">ℹ️</span>
                             <span class="gem-info-card">
                                 <strong>💎 How Hidden Gems Are Identified:</strong><br>
-                                Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
+                                Hidden Gems are PolyCop addresses with a lower site ranking (PolyCop Score &lt; 75), yet pass <strong>100% of our strict $100 Bankroll Hard Rejection Gates</strong> with an <strong>A-Tier Screener Score (&ge;65)</strong>!
                             </span>
                         </span>
                     </button>
@@ -349,6 +349,7 @@
                         <span class="header-score-badge badge-screener" id="modalScreenerScore">92.5 / 100 Pts</span>
                         <span class="header-score-badge badge-polycop" id="modalPolyCopScore">68 / 100 Site</span>
                         <span class="header-score-badge" id="modalGradeBadge">S-Tier</span>
+                        <span class="header-score-badge badge-rank" id="modalRankBadge">#1</span>
                     </div>
                     <div class="modal-addr-row" style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
                         <div class="wallet-card-addr" id="modalAddr">0x0000...0000</div>
@@ -385,7 +386,7 @@
                     <div class="num" id="cardWinRate">0.0%</div>
                     <div class="lbl">Recent 20 Win Rate</div>
                     <div class="tooltip-text">
-                        <strong>Win Rate:</strong> Historical market win rate %. Hard gate rejects &lt; 45% (losing streak risk).
+                        <strong>Win Rate:</strong> Historical market win rate %. Shown for reference only &mdash; a low recent win rate no longer hard-rejects on its own (the divergence and P/L gates cover that failure instead; see ADR 0003).
                     </div>
                 </div>
                 <div class="score-card-box">

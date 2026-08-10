@@ -52,29 +52,70 @@ npm run rescan
 
 ## ⚡ 100-Point Weighted Scoring Model
 
-PolyCop Bot Screener scores wallets using a multi-factor continuous model and instant disqualification gates.
+PolyCop Bot Screener scores wallets in two stages: the 100-point Copyability Score below triages which
+candidates are worth simulating, and a Slippage Sensitivity Sweep of Simulated Copy Runs decides the
+verdict. Tiers shown on the dashboard come from simulated performance, not from the score. The gate
+values, weights and tier bands below are generated from `app/src/screener/score_wallets.py` (the single
+source of truth) — never edit this section by hand, and CI fails if it drifts from the code.
 
-### 🛑 Hard Rejection Gates (Instant Disqualification)
-- **Toxic Copy Poison**: Backtest Copy PnL < $0
-- **High Slippage Rate**: Slippage Cost Rate `(Actual - Copy) / |Actual| > 100%`
-- **Hedged Rate Violation**: Hedged Position Rate > 3.0%
-- **Poor Risk/Reward**: P/L Ratio < 0.3
-- **Short Track Record**: Active Markets < 20
-- **Whale Trade Sizing**: Avg Investment > $300 USD
-- **High-Frequency Arbitrage Bot**: Markets > 300 & Slippage Rate > 5.0%
+<!-- SCORING-SPEC:BEGIN -->
 
-### 📊 Weighted Scoring Breakdown (100 Points Total)
-| Parameter | Weight | Target Criteria |
-| :--- | :---: | :--- |
-| **Slippage Cost Rate** | 20% | `< 10%` slippage cost rate |
-| **Recent 20 PnL & Slip** | 15% | PnL > $1,000 & Slip < 5% |
-| **Hedged Position Rate** | 15% | `< 3.0%` total hedged rate |
-| **Daily Green Rate** | 15% | `> 85%` winning days |
-| **Recent 20 Win Rate** | 10% | `> 75%` win rate |
-| **Avg Profit / Loss Ratio** | 10% | `> 3.0` P/L ratio |
-| **PnL / Volume Ratio** | 5% | `> 30%` profit efficiency |
-| **Markets Sample Size** | 5% | `> 200` total markets traded |
-| **Continuous Sizing Fit** | 5% | `$25` optimal peak sizing |
+### Scoring Engine — Gates, Parameters and Tiers
+
+> This section is generated from `app/src/screener/score_wallets.py` via
+> `tools/scoring_docs.py`. Do not edit it by hand — change the code and run
+> `python tools/scoring_docs.py generate`, or CI will fail the drift check.
+
+#### Hard Rejection Gates (instant disqualification, never traded off)
+
+| Gate | Condition | Why |
+| :--- | :--- | :--- |
+| PolyCop Site Score sanity floor | `< 40 / 100` | stops manually pasted garbage from being scored once the leaderboard pre-filter is gone |
+| Toxic Copy Poison | `Copy PnL < $0` | a modelled copy that loses money is not a target |
+| Slippage Cost Rate | `> 5.0% modelled` | roughly 21% real under the Friction Realism Multiplier (ADR 0001) |
+| Hedged Rate | `> 3.0%` | market-making signature and doubled friction legs |
+| Profit/Loss Ratio | `< 0.3` | winning pennies, losing dollars |
+| Markets Sample | `< 20` | a streak, not a track record |
+| Whale Avg Invest | `> $200` | a typical trade that dwarfs the bankroll cannot be mirrored |
+| Divergence | `r20_pnl < $0 while actual_pnl > $1,000` | a dead edge must not be carried by history |
+
+#### Continuous Parameters (100 points total)
+
+| Parameter | Points | Zero points | Full marks |
+| :--- | :---: | :--- | :--- |
+| Edge-to-Friction Ratio | 22 | <= 1.0 (break-even) | >= 3.0 — edge per dollar of friction; the cheapest disqualifying arithmetic runs first |
+| Slippage Cost Rate | 15 | >= 5.0% | <= 1.0% — modelled, before the Friction Realism Multiplier |
+| Drawdown Depth | 12 | >= 0.50 of peak | 0.0 — from the lifetime equity curve |
+| Copyable Window Share | 10 | 0% | 100% — share of trades the Copyable Trade Window admits |
+| Recent Form | 10 | PnL <= $0 or slip unmeasured | >= 100% return over the recent-20 window at 0% slip — return on deployed capital, judged against the friction it came through (ADR 0004) |
+| Daily Green Rate | 8 | < 40% or fewer than 10 observed days | >= 85% — copy-adjusted, measured from real per-day simulated results |
+| Profit/Loss Ratio | 8 | <= 0.3 | >= 3.0 |
+| Sizing Fit | 5 | outside the Copyable Trade Window | at the window midpoint — peak derived from the Copy Execution Profile, never hand-picked |
+| Hedged Control | 5 | >= 3.0% | 0% |
+| Markets Sample | 3 | < 20 | >= 200 |
+| Capital Efficiency | 2 | 0 | >= 30 PnL/volume ratio |
+
+#### Copyability Score Tier Bands (triage only — verdicts come from simulation)
+
+| Tier | Score |
+| :--- | :--- |
+| S-Tier (God-Tier Target) | &ge; 72 |
+| A-Tier (Strong Copy Target) | &ge; 65 |
+| B-Tier (Moderate Copy Target) | &ge; 60 |
+| C-Tier (High Risk / Volatile) | &ge; 50 |
+| F-Tier (Toxic / Rejection) | < 50 |
+
+#### Simulated Verdict Tier Bands (Edge Retention — the verdict)
+
+| Tier | Edge Retention |
+| :--- | :--- |
+| S-Tier (God-Tier Target) | &ge; 0.85 |
+| A-Tier (Strong Copy Target) | &ge; 0.70 |
+| B-Tier (Moderate Copy Target) | &ge; 0.50 |
+| C-Tier (High Risk / Volatile) | &ge; 0.30 |
+| F-Tier / REJECT | < 0.30 |
+
+<!-- SCORING-SPEC:END -->
 
 ---
 
@@ -90,7 +131,7 @@ polycop-bot-screener/
 │   │   └── server/             # Local Web App HTTP proxy server
 │   └── web/                    # Frontend dashboard (HTML/CSS/JS)
 │       ├── css/styles.css      # Dark-mode glassmorphism stylesheet
-│       └── js/                 # Dashboard UI controller & JS scoring engine
+│       └── js/                 # Dashboard UI controller
 ├── tasks/                      # Project roadmap & planning notes
 ├── tests/                      # Unit tests for scoring engine
 └── screen.py                   # Master entry point script

@@ -315,6 +315,25 @@ function renderTierCell(t) {
     `;
 }
 
+function renderRankCell(t) {
+    // Where the wallet sits in this scan, alongside its verdict. Stamped by
+    // the pipeline from the final ordering, so it is never recomputed here.
+    if (t.scan_rank === null || t.scan_rank === undefined) {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">Scan Rank</span>
+                <span class="summary-val tier-unsimulated">—</span>
+            </div>
+        `;
+    }
+    return `
+        <div class="summary-cell">
+            <span class="summary-lbl">Scan Rank</span>
+            <span class="summary-val rank-number">#${t.scan_rank}</span>
+        </div>
+    `;
+}
+
 function renderRetentionCell(t) {
     const retention = t.edge_retention;
     if (retention === null || retention === undefined) {
@@ -360,12 +379,11 @@ function renderGrid() {
                 <button class="btn-copy-mini" onclick="copyAddressToClipboard(event, '${t.address}')" title="Copy address to clipboard">📋 Copy Address</button>
             </div>
         `;
-        const gemBadgeHtml = isGem ? `
-            <div class="badge-gem-wrapper">
+        const gemBadgeHtml = isGem ? `                <div class="badge-gem-wrapper">
                 <span class="badge-gem">💎 GEM</span>
                 <div class="gem-tooltip-text">
                     <strong>💎 Hidden Gem Detected!</strong><br>
-                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with a <strong>God-Tier Screener Score (&ge;80.0)</strong>!
+                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;65)</strong>!
                 </div>
             </div>
         ` : '';
@@ -412,6 +430,7 @@ function renderGrid() {
                         <span class="summary-lbl">Avg Invest</span>
                         <span class="summary-val">$${t.metrics.avg_invest}</span>
                     </div>
+                    ${renderRankCell(t)}
                     <div class="summary-cell">
                         <span class="summary-lbl">Last Active</span>
                         <span class="summary-val activity-val" data-tier="${lastActive.tier}">${lastActive.text}</span>
@@ -481,6 +500,7 @@ function openModal(idx) {
     document.getElementById("modalGradeBadge").innerText = target.verdict_source === "simulation" && target.tier
         ? `${target.tier} (simulated)`
         : `${target.grade} (triage only)`;
+    document.getElementById("modalRankBadge").innerText = target.scan_rank ? `#${target.scan_rank}` : "—";
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
     renderBalanceMiss(target);
     document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
@@ -539,28 +559,27 @@ function navigateModal(direction) {
 function renderParamBars(target) {
     const container = document.getElementById("paramBarsContainer");
     const b = target.breakdown || {};
+    const labels = target.breakdown_labels || {};
+    const points = target.breakdown_points || {};
 
-    const maxScores = {
-        "1. Slippage Cost Rate (20%)": 20,
-        "2. Recent 20 PnL & Slip (15%)": 15,
-        "3. Hedged Control < 3% (15%)": 15,
-        "4. Daily Green Rate (15%)": 15,
-        "5. Recent 20 Win Rate (10%)": 10,
-        "6. Profit/Loss Ratio (10%)": 10,
-        "7. Capital Efficiency (5%)": 5,
-        "8. Markets Sample (5%)": 5,
-        "9. Continuous Sizing Fit ($25 Peak) (5%)": 5
-    };
+    // The eleven parameters are keyed by stable ids (engine parameter order).
+    // Labels and maxima come from the feed, so the UI has no hardcoded weight
+    // or percentage literals — a reweight cannot leave the page stale.
+    const keys = Object.keys(labels);
+    if (!keys.some(k => b[k] !== undefined)) {
+        container.innerHTML = `<div class="bm-empty">No breakdown was carried through for this wallet.</div>`;
+        return;
+    }
 
-    container.innerHTML = Object.keys(maxScores).map(key => {
+    container.innerHTML = keys.map(key => {
         const score = b[key] || 0.0;
-        const max = maxScores[key];
-        const pct = Math.min((score / max) * 100, 100);
+        const max = points[key] || 0;
+        const pct = max > 0 ? Math.min((score / max) * 100, 100) : 0;
 
         return `
             <div class="param-bar-item">
                 <div class="param-bar-header">
-                    <span class="param-bar-title">${key}</span>
+                    <span class="param-bar-title">${labels[key] || key}</span>
                     <span class="param-bar-score">${score} / ${max} pts</span>
                 </div>
                 <div class="bar-track-outer">
@@ -577,33 +596,17 @@ function renderRadarChart(target) {
 
     const getScorePct = (score, max) => Math.round(Math.min(Math.max((score / max) * 100, 0), 100));
     const b = target.breakdown || {};
+    const labels = target.radar_labels || {};
+    const points = target.breakdown_points || {};
 
-    const radarValues = [
-        getScorePct(b["1. Slippage Cost Rate (20%)"] || 0, 20),
-        getScorePct(b["2. Recent 20 PnL & Slip (15%)"] || 0, 15),
-        getScorePct(b["3. Hedged Control < 3% (15%)"] || 0, 15),
-        getScorePct(b["4. Daily Green Rate (15%)"] || 0, 15),
-        getScorePct(b["5. Recent 20 Win Rate (10%)"] || 0, 10),
-        getScorePct(b["6. Profit/Loss Ratio (10%)"] || 0, 10),
-        getScorePct(b["7. Capital Efficiency (5%)"] || 0, 5),
-        getScorePct(b["8. Markets Sample (5%)"] || 0, 5),
-        getScorePct(b["9. Continuous Sizing Fit ($25 Peak) (5%)"] || 0, 5)
-    ];
+    // Radar labels and maxima come from the feed, matching the stable ids.
+    const keys = Object.keys(labels);
+    const radarValues = keys.map(k => getScorePct(b[k] || 0, points[k] || 0));
 
     radarChartInstance = new Chart(ctx, {
         type: 'radar',
         data: {
-            labels: [
-                'Slippage Cost (20%)',
-                'Recent 20 PnL (15%)',
-                'Hedged Control (15%)',
-                'Daily Green (15%)',
-                'Win Rate (10%)',
-                'P/L Ratio (10%)',
-                'Efficiency (5%)',
-                'Sample Size (5%)',
-                'Sizing Fit (5%)'
-            ],
+            labels: keys.map(k => labels[k]),
             datasets: [{
                 label: 'Screener Score %',
                 data: radarValues,
@@ -651,10 +654,14 @@ async function startLeaderboardScan() {
         const resp = await fetch("/api/rescan?t=" + Date.now());
         if (!resp.ok) throw new Error("Rescan API returned status " + resp.status);
         const data = await resp.json();
-        allTargets = data.verified_targets || [];
-        updateSummaryHeader(data);
-        filterAndRender();
-        alert(`Scan Complete!\nTotal Scraped: ${data.total_scraped_profiles || 0}\nVerified Targets: ${data.total_verified_targets || 0}`);
+        // The endpoint returns the Phase 3 payload, which is what the feed
+        // file now holds too, so the page rereads it through the one path
+        // that knows how to normalise it. Reading the response here instead
+        // meant a second copy of that knowledge, and it had already drifted:
+        // it looked for `verified_targets`, which no payload has ever had,
+        // so a finished scan emptied the grid it was supposed to fill.
+        await loadDataset();
+        alert(`Scan Complete!\nTargets evaluated: ${data.total_targets_evaluated ?? 0}\nSimulated survivors: ${data.simulated_survivors_count ?? 0}`);
     } catch (err) {
         console.error("Leaderboard scan error:", err);
         alert("Scan failed: " + err.message);

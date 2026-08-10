@@ -75,18 +75,11 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
         # API endpoint to trigger full rescan pipeline (Phase 1 & Phase 2)
         if parsed.path.startswith('/api/rescan'):
             try:
-                from pipeline.phase1_scrape_leaderboard import fetch_and_scrape_leaderboard
-                from pipeline.phase2_filter_targets import run_phase2_filter
-                from pipeline.phase3_simulation_rank import run_phase3_simulation_rank
+                # One call site for the phase1→2→3 sequence, shared with
+                # screen.py, so adding a phase cannot desync the two runners.
+                from pipeline.orchestrator import run_pipeline
 
-                fetch_and_scrape_leaderboard()
-                run_phase2_filter()
-                # Verdicts come from simulated performance, so a rescan that
-                # stopped at triage would leave the page showing the previous
-                # run's simulation beside this run's triage scores.
-                run_phase3_simulation_rank()
-
-                verified_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+                verified_file = run_pipeline()
                 if os.path.exists(verified_file):
                     with open(verified_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
@@ -108,73 +101,7 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
         # API endpoint to run live latency and slippage benchmark
         if parsed.path.startswith('/api/measure_latency'):
             try:
-                from tools.measure_latency_slippage import (
-                    discover_markets, measure_http_rtt, measure_ws_rtt, profile_timeframe
-                )
-                import time
-                import datetime
-
-                start_time = time.monotonic()
-                TOTAL_BUDGET = 14.0
-                is_partial = False
-
-                def remaining_budget():
-                    return max(0.0, TOTAL_BUDGET - (time.monotonic() - start_time))
-
-                markets = discover_markets()
-                probe_token = ""
-                if markets.get("5m"):
-                    probe_token = markets["5m"][0]["token_id"]
-                elif markets.get("15m"):
-                    probe_token = markets["15m"][0]["token_id"]
-
-                latency_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
-                ws_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
-                profile_5m = {}
-                profile_15m = {}
-
-                if remaining_budget() > 0.5:
-                    latency_stats = measure_http_rtt(probe_token, samples=3)
-                else:
-                    is_partial = True
-
-                if remaining_budget() > 0.5:
-                    ws_stats = measure_ws_rtt(samples=3)
-                else:
-                    is_partial = True
-
-                if remaining_budget() > 0.5:
-                    profile_5m = profile_timeframe(markets.get("5m", []), "5m")
-                else:
-                    is_partial = True
-
-                if remaining_budget() > 0.5:
-                    profile_15m = profile_timeframe(markets.get("15m", []), "15m")
-                else:
-                    is_partial = True
-
-                payload = {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    "partial": is_partial or (time.monotonic() - start_time) >= TOTAL_BUDGET,
-                    "latency": {
-                        "http_rtt_ms": latency_stats,
-                        "ws_rtt_ms": {
-                            "avg": ws_stats.get("avg", 0.0),
-                            "min": ws_stats.get("min", 0.0),
-                            "max": ws_stats.get("max", 0.0),
-                            "ok": ws_stats.get("ok", False),
-                            "error": ws_stats.get("error", ""),
-                            "samples_completed": ws_stats.get("samples_completed", 0),
-                            "samples_attempted": ws_stats.get("samples_attempted", 0),
-                            "url": ws_stats.get("url", "")
-                        }
-                    },
-                    "markets": {
-                        "5m_markets": profile_5m,
-                        "15m_markets": profile_15m
-                    }
-                }
-                payload_bytes = json.dumps(payload).encode("utf-8")
+                payload_bytes = json.dumps(_measure_latency_payload()).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -199,6 +126,81 @@ class PolyCopScreenerWebHandler(http.server.SimpleHTTPRequestHandler):
             self.path = '/index.html'
 
         return super().do_GET()
+
+def _measure_latency_payload():
+    """Run the budgeted live latency and slippage benchmark.
+
+    A live probe with a hard time budget: each measurement is attempted only
+    while budget remains, and the payload states which stages were skipped so
+    a partial run is visible rather than looking complete.
+    """
+    from tools.measure_latency_slippage import (
+        discover_markets, measure_http_rtt, measure_ws_rtt, profile_timeframe
+    )
+    import datetime
+    import time
+
+    start_time = time.monotonic()
+    TOTAL_BUDGET = 14.0
+    is_partial = False
+
+    def remaining_budget():
+        return max(0.0, TOTAL_BUDGET - (time.monotonic() - start_time))
+
+    markets = discover_markets()
+    probe_token = ""
+    if markets.get("5m"):
+        probe_token = markets["5m"][0]["token_id"]
+    elif markets.get("15m"):
+        probe_token = markets["15m"][0]["token_id"]
+
+    latency_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
+    ws_stats = {"avg": 0.0, "min": 0.0, "max": 0.0, "ok": False, "error": "Skipped due to deadline budget", "samples_completed": 0, "samples_attempted": 0, "url": ""}
+    profile_5m = {}
+    profile_15m = {}
+
+    if remaining_budget() > 0.5:
+        latency_stats = measure_http_rtt(probe_token, samples=3)
+    else:
+        is_partial = True
+
+    if remaining_budget() > 0.5:
+        ws_stats = measure_ws_rtt(samples=3)
+    else:
+        is_partial = True
+
+    if remaining_budget() > 0.5:
+        profile_5m = profile_timeframe(markets.get("5m", []), "5m")
+    else:
+        is_partial = True
+
+    if remaining_budget() > 0.5:
+        profile_15m = profile_timeframe(markets.get("15m", []), "15m")
+    else:
+        is_partial = True
+
+    return {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "partial": is_partial or (time.monotonic() - start_time) >= TOTAL_BUDGET,
+        "latency": {
+            "http_rtt_ms": latency_stats,
+            "ws_rtt_ms": {
+                "avg": ws_stats.get("avg", 0.0),
+                "min": ws_stats.get("min", 0.0),
+                "max": ws_stats.get("max", 0.0),
+                "ok": ws_stats.get("ok", False),
+                "error": ws_stats.get("error", ""),
+                "samples_completed": ws_stats.get("samples_completed", 0),
+                "samples_attempted": ws_stats.get("samples_attempted", 0),
+                "url": ws_stats.get("url", "")
+            }
+        },
+        "markets": {
+            "5m_markets": profile_5m,
+            "15m_markets": profile_15m
+        }
+    }
+
 
 def start_server(port=PORT):
     os.chdir(WEB_DIR)

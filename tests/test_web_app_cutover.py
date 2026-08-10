@@ -49,6 +49,30 @@ class TestThePageReadsTheSimulationFeed(unittest.TestCase):
     def test_it_reads_the_simulated_targets_collection(self):
         self.assertIn("simulated_targets", self.app_js)
 
+    def test_the_scan_path_rereads_the_feed_rather_than_parsing_the_response(self):
+        """A finished scan must fill the grid, not empty it.
+
+        The scan handler kept its own reading of the payload and it had
+        drifted to `verified_targets`, a key no payload has ever carried, so
+        every completed scan blanked the wallet grid and left a header count
+        with nothing behind it. One reader means it cannot drift again.
+        """
+        scan_body = self.app_js.split("async function startLeaderboardScan()", 1)[1]
+        scan_body = scan_body.split("\nasync function", 1)[0]
+        self.assertIn("loadDataset()", scan_body)
+
+    def test_no_key_the_feed_does_not_carry_is_read_anywhere(self):
+        # Comments are stripped first: the one above the scan handler names
+        # the dead key in order to explain why it must not come back.
+        code = "\n".join(
+            line for line in self.app_js.splitlines()
+            if not line.lstrip().startswith("//")
+        )
+        for absent in ("verified_targets", "total_scraped_profiles", "total_verified_targets"):
+            self.assertNotIn(
+                absent, code, f"{absent} is not a key of the Phase 3 payload"
+            )
+
 
 class TestProvenanceIsOnThePage(unittest.TestCase):
     def setUp(self):

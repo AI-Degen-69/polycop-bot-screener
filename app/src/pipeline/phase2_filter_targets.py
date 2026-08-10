@@ -14,29 +14,15 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from execution.copy_execution_profile import CURRENT_PROFILE
-from screener.score_wallets import calculate_bankroll_optimized_score, calculate_edge_retention
-from screener.activity import compute_activity, parse_timestamp, summarize_buckets
-from pipeline.run_mock_client import parse_run_mock_response, calculate_copyable_window_share
-from screener.derived_metrics import (
-    calculate_daily_green_rate,
-    calculate_drawdown_depth,
-    calculate_edge_to_friction,
+from pipeline.leaderboard_adapter import to_engine_metrics
+from screener.score_wallets import (
+    GEM_SITE_SCORE_MAX,
+    TIER_A_MIN,
+    TIER_S_MIN,
+    calculate_bankroll_optimized_score,
+    calculate_edge_retention,
 )
-
-def _optional_float(value):
-    """A leaderboard figure that was present, or None if it was not.
-
-    Coercing an absent figure to zero is not neutral: for a cost, zero is the
-    best possible reading, and the engine would score the wallet as though it
-    traded without friction.
-    """
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return None
-
+from screener.activity import compute_activity, parse_timestamp, summarize_buckets
 
 def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
     """
@@ -84,43 +70,14 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         # Measured before scoring, not after. Each of these is None when the
         # source data will not support it, and the engine scores None as nothing,
         # so an unmeasured wallet ranks below a measured poor one.
-        mock_payload = p.get("run_mock_response") or p.get("mock_data")
-        sim_summary = parse_run_mock_response(mock_payload) if mock_payload else None
-        window_share = calculate_copyable_window_share(mock_payload) if mock_payload else None
-        green_rate, observed_days = calculate_daily_green_rate(p.get("daily_stats_json"))
-        drawdown_depth = calculate_drawdown_depth(p.get("all_pnl_json"))
-        # Each fallback is tried only when the one before it is genuinely absent,
-        # so a present-but-null field does not abort the run or masquerade as a
-        # measured zero.
-        pnl_vol_ratio = None
-        for key in ("roi", "pnl_to_volume_ratio", "pnl_vol_ratio"):
-            pnl_vol_ratio = _optional_float(p.get(key))
-            if pnl_vol_ratio is not None:
-                break
-        edge_to_friction = calculate_edge_to_friction(pnl_vol_ratio, profile.slippage_pct)
-
-        raw_metrics = {
-            "actual_pnl": float(p.get("actual_pnl", p.get("pnl", 0.0))),
-            "copy_pnl": float(p.get("copy_backtest_pnl", p.get("copy_pnl", -1.0))),
-            "slippage": float(p.get("slippage", 0.0)),
-            "hedged_pct": float(p.get("hedged_pct", p.get("hedged_percentage", 0.0))),
-            "pl_ratio": float(p.get("avg_profit_loss_ratio", p.get("pl_ratio", 0.0))),
-            "days_win_rate": green_rate,
-            "observed_days": observed_days,
-            "r20_win_rate": float(p.get("r20_wr", p.get("recent_20_win_rate", p.get("r20_win_rate", 0.0)))),
-            "r20_pnl": float(p.get("r20_pnl", p.get("recent_20_pnl", 0.0))),
-            "r20_slip": _optional_float(p.get("r20_slip", p.get("recent_20_slippage"))),
-            # Capital Efficiency reads this directly and an unknown ratio earns
-            # nothing there, which zero already expresses.
-            "pnl_vol_ratio": pnl_vol_ratio if pnl_vol_ratio is not None else 0.0,
-            "avg_invest": float(p.get("avg_invest", 0.0)),
-            "markets": int(p.get("markets_traded", p.get("markets", 0))),
-            "polycop_site_score": float(p.get("polycop_site_score", p.get("score", 0.0))),
-            "buy_price": float(p.get("buy_price", p.get("avg_buy_price", 0.0))),
-            "drawdown_depth": drawdown_depth,
-            "copyable_window_share": window_share,
-            "edge_to_friction": edge_to_friction,
-        }
+        meas = to_engine_metrics(p, profile.slippage_pct)
+        raw_metrics = meas["raw_metrics"]
+        sim_summary = meas["sim_summary"]
+        window_share = meas["window_share"]
+        green_rate = meas["green_rate"]
+        observed_days = meas["observed_days"]
+        drawdown_depth = meas["drawdown_depth"]
+        edge_to_friction = meas["edge_to_friction"]
 
         audit_res = calculate_bankroll_optimized_score(raw_metrics, profile=profile)
 
@@ -129,7 +86,11 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
             continue
 
         score = audit_res["final_score"]
-        is_gem = raw_metrics["polycop_site_score"] < 75 and score >= 80.0
+        # "Rated highly" is defined by the recalibrated tier bands (ADR 0005):
+        # a wallet the screen grades A-Tier or better while the site rates it
+        # poorly. The old constant 80.0 is gone so the gem definition cannot
+        # silently diverge from the tier floors.
+        is_gem = raw_metrics["polycop_site_score"] < GEM_SITE_SCORE_MAX and score >= TIER_A_MIN
         raw_name = p.get("name") or p.get("username")
         name_str = str(raw_name) if raw_name else f"PolyCop_Trader ({addr[:6]}...{addr[-4:]})"
 
@@ -162,14 +123,17 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
             },
             "activity": compute_activity(p, now=scrape_now),
             "breakdown": audit_res["breakdown"],
+            "breakdown_labels": audit_res["breakdown_labels"],
+            "radar_labels": audit_res["radar_labels"],
+            "breakdown_points": audit_res["breakdown_points"],
             "bankroll_analysis": audit_res["bankroll_analysis"]
         }
 
 
         verified_targets.append(target_entry)
-        if score >= 90.0:
+        if score >= TIER_S_MIN:
             s_tier.append(target_entry)
-        elif score >= 80.0:
+        elif score >= TIER_A_MIN:
             a_tier.append(target_entry)
         if is_gem:
             gems.append(target_entry)
@@ -199,8 +163,8 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
     print(f"Total Scraped Profiles Evaluated: {len(raw_profiles)}")
     print(f"Disqualified Rejects: {rejected_count}")
     print(f"Verified PASS Targets: {len(verified_targets)}")
-    print(f"  |-- S-Tier (>= 90 Pts): {len(s_tier)}")
-    print(f"  |-- A-Tier (80-89 Pts): {len(a_tier)}")
+    print(f"  |-- S-Tier (>= {TIER_S_MIN:.0f} Pts): {len(s_tier)}")
+    print(f"  |-- A-Tier ({TIER_A_MIN:.0f}-{TIER_S_MIN - 1:.0f} Pts): {len(a_tier)}")
     print(f"  +-- Hidden Gems: {len(gems)}")
     print(f"Activity buckets: {summary_data['activity_buckets']}")
     print(f"Saved verified feed to: {out_file}")

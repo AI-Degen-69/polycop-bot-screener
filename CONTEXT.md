@@ -32,7 +32,7 @@ elsewhere.
 _Avoid_: filter, threshold, cutoff
 
 **Copyability Score**:
-A weighted sum out of 100 used to triage candidates cheaply. It orders wallets for further work; it
+A weighted sum used to triage candidates cheaply. It orders wallets for further work; it
 is not the verdict. A parameter whose input could not be measured contributes nothing to the sum,
 so an unmeasured wallet scores low rather than scoring well by default.
 _Avoid_: rating, grade, rank
@@ -45,6 +45,12 @@ _Avoid_: grade, class
 **Hidden Gem**:
 A wallet the screen rates highly while the leaderboard's own score rates it poorly. The disagreement
 is the point.
+
+**Scan**:
+A complete screening pass: every candidate scraped, filtered, scored and simulated together,
+producing the feed the page reads. One wallet being scored is not a scan; a scan is the whole
+pass. A repeated scan is a rescan.
+_Avoid_: run, audit run, pipeline run
 
 ### Execution
 
@@ -101,8 +107,9 @@ A target's average round-trip edge divided by expected round-trip friction. Belo
 uncopyable by arithmetic regardless of any other metric.
 
 **Copyable Window Share**:
-The share of a target's trades falling inside the copyable trade window. Measures how much of the
-target's behaviour the follower gets to replicate at all.
+The share of a target's entry signals falling inside the copyable trade window. Measures how much of
+the target's behaviour the follower gets to replicate at all. Entries only: the window is a range of
+sizes and has a say where a position is opened, while exits inherit whatever the entry did.
 
 **Hedged Rate**:
 The share of a target's markets held on both sides at once. Read as a market-making signature, and

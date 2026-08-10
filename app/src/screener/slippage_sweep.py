@@ -1,14 +1,16 @@
+import os
+import sys
 from typing import Dict, Any, List, Optional
 
-try:
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# SCRIPT_DIR is app/src/screener -> SRC_DIR is app/src
+SRC_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
-    from pipeline.run_mock_client import fetch_simulated_copy_run
-    from screener.score_wallets import calculate_edge_retention
-    from execution.copy_execution_profile import CURRENT_PROFILE
-except ModuleNotFoundError:
-    from app.src.pipeline.run_mock_client import fetch_simulated_copy_run
-    from app.src.screener.score_wallets import calculate_edge_retention
-    from app.src.execution.copy_execution_profile import CURRENT_PROFILE
+from execution.copy_execution_profile import CURRENT_PROFILE
+from pipeline.run_mock_client import fetch_simulated_copy_run
+from screener.score_wallets import calculate_edge_retention
 
 
 DEFAULT_SLIPPAGE_LEVELS = [2.0, 5.0, 10.0, 15.0]

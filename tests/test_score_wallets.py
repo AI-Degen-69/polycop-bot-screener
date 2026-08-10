@@ -8,7 +8,15 @@ SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from screener.score_wallets import calculate_bankroll_optimized_score, calculate_edge_retention
+from screener.score_wallets import (
+    TIER_A_MIN,
+    TIER_B_MIN,
+    TIER_C_MIN,
+    TIER_S_MIN,
+    calculate_bankroll_optimized_score,
+    calculate_edge_retention,
+    grade_for_score,
+)
 
 class TestScoreWalletsEngine(unittest.TestCase):
     def test_edge_retention_positive_pnl(self):
@@ -48,7 +56,9 @@ class TestScoreWalletsEngine(unittest.TestCase):
         }
         res = calculate_bankroll_optimized_score(metrics, user_capital=100.0)
         self.assertEqual(len(res["rejection_reasons"]), 0)
-        self.assertGreaterEqual(res["final_score"], 80.0)
+        # Recalibrated tier bands (ADR 0005): a fully measured wallet must clear
+        # the S-Tier floor, which is 72 rather than the inherited 90.
+        self.assertGreaterEqual(res["final_score"], TIER_S_MIN)
 
     def test_whale_gate_at_200(self):
         """Test Hard Gate: Avg Invest > $200.00 USD."""
@@ -94,9 +104,18 @@ def _clean_metrics(**overrides):
 
 
 def _points(res, needle):
-    matched = [v for k, v in res["breakdown"].items() if needle in k]
-    assert len(matched) == 1, f"expected one breakdown row matching {needle!r}, got {matched}"
-    return matched[0]
+    # Try stable id first, then match against the display labels (which are
+    # the engine's canonical source, so a needle like "Edge-to-Friction"
+    # finds the right row).
+    b = res["breakdown"]
+    labels = res.get("breakdown_labels", {})
+    if needle in b:
+        return b[needle]
+    for bid, lbl in labels.items():
+        if needle in lbl:
+            return b[bid]
+    matched = [v for k, v in b.items() if needle in k]
+    raise AssertionError(f"expected one breakdown row matching {needle!r}, got {matched}")
 
 
 class TestUnmeasuredParametersFailClosed(unittest.TestCase):
@@ -192,6 +211,33 @@ class TestRecentFormWeighsSlip(unittest.TestCase):
         self.assertAlmostEqual(_points(res, "Recent Form"), 0.0, places=2)
 
 
+class TestRecentFormMeasuresReturnNotAbsoluteDollars(unittest.TestCase):
+    """ADR 0004: recent profit is scored against the capital that produced it.
+
+    An absolute-dollar scale rewards the target's size rather than its edge: a
+    big trader clears the threshold on ordinary performance while a small trader
+    needs a far better result for the same points. Return makes the parameter
+    measure edge per dollar deployed.
+    """
+
+    def test_the_same_absolute_pnl_scores_more_on_a_smaller_target(self):
+        big = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=800.0, avg_invest=160.0))
+        small = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=800.0, avg_invest=40.0))
+        # Same $800 of recent profit, but the $40 target earned a 100% return on
+        # its deployed capital while the $160 target earned 25%.
+        self.assertGreater(_points(small, "Recent Form"), _points(big, "Recent Form"))
+
+    def test_full_marks_need_a_100_percent_return_over_the_window(self):
+        # $1,000 recent profit on $50 average investment is a 100% return over
+        # the 20-trade window at zero slip.
+        res = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=1000.0, avg_invest=50.0, r20_slip=0.0))
+        self.assertAlmostEqual(_points(res, "Recent Form"), 10.0, places=2)
+
+    def test_an_unknown_target_size_scores_nothing(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(r20_pnl=1000.0, avg_invest=0.0))
+        self.assertAlmostEqual(_points(res, "Recent Form"), 0.0, places=2)
+
+
 class TestSizingFitFollowsTheCopyableWindow(unittest.TestCase):
     """The peak belongs where the realised copy ratio equals the nominal one."""
 
@@ -219,6 +265,35 @@ class TestSizingFitFollowsTheCopyableWindow(unittest.TestCase):
         """Above the window the position cap clips the copy below the nominal ratio."""
         res = calculate_bankroll_optimized_score(_clean_metrics(avg_invest=190.0))
         self.assertAlmostEqual(_points(res, "Sizing Fit"), 0.0, places=2)
+
+
+class TestRecalibratedTierBands(unittest.TestCase):
+    """Bands were inherited from the old engine and never checked against the
+    score distribution the current engine produces (ADR 0005). These assert the
+    recalibrated floors directly, so a future move of a boundary is visible.
+    """
+
+    def test_the_bands_are_the_recalibrated_absolutes(self):
+        self.assertEqual(TIER_S_MIN, 72.0)
+        self.assertEqual(TIER_A_MIN, 65.0)
+        self.assertEqual(TIER_B_MIN, 60.0)
+        self.assertEqual(TIER_C_MIN, 50.0)
+
+    def test_each_band_claims_its_score_range(self):
+        self.assertIn("S-Tier", grade_for_score(TIER_S_MIN))
+        self.assertIn("A-Tier", grade_for_score(TIER_A_MIN))
+        self.assertIn("B-Tier", grade_for_score(TIER_B_MIN))
+        self.assertIn("C-Tier", grade_for_score(TIER_C_MIN))
+        self.assertIn("F-Tier", grade_for_score(TIER_C_MIN - 0.01))
+
+    def test_the_engine_assigns_the_band_the_score_earns(self):
+        res = calculate_bankroll_optimized_score(
+            _clean_metrics(edge_to_friction=3.0, copyable_window_share=1.0,
+                           drawdown_depth=0.0, days_win_rate=95.0,
+                           observed_days=14, r20_pnl=2000.0, r20_slip=0.0,
+                           pl_ratio=4.0, pnl_vol_ratio=30.0, markets=250)
+        )
+        self.assertEqual(res["grade"], grade_for_score(res["final_score"]))
 
 
 class TestScaleIsIntact(unittest.TestCase):

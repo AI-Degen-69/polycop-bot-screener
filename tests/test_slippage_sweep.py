@@ -1,6 +1,14 @@
+import os
+import sys
+
 import pytest
-from app.src.execution.copy_execution_profile import CURRENT_PROFILE
-from app.src.screener.slippage_sweep import run_slippage_sensitivity_sweep
+
+SCRIPT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app", "src"))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
+from screener.slippage_sweep import run_slippage_sensitivity_sweep  # noqa: E402
 
 def test_slippage_sweep_all_four_levels():
     """Verify sweep executes 4 simulation runs across 2%, 5%, 10%, and 15% slippage."""

@@ -1,35 +1,72 @@
 # Project AGENTS Rules
 
 ### PolyCop & Polymarket Weighted 100-Point Audit Standard
-Whenever asked to evaluate, recommend, or analyze a Polymarket copy-trading wallet:
+Whenever asked to evaluate, recommend, or analyze a Polymarket copy-trading wallet, score it with the
+engine as canon. The authoritative gate list, parameter weights and tier bands are generated from
+`app/src/screener/score_wallets.py` (the only source of truth) in the section below; the scoring
+engine's `SCORING_SPEC` and `tools/scoring_docs.py` produce it, and CI fails if the two diverge.
+Never quote a gate threshold or point weight from memory — read it from the generated tables.
 
-1. **PolyCop AI Tier 1 Hard Rejection Gates (Instant Disqualification)**:
-   - **Backtest Copy PnL < $0**: Toxic copy poison (Instant REJECT).
-   - **Slippage Cost Rate > 100%**: `(Actual PnL - Copy PnL) / |Actual PnL| > 1.0` -> Pure Arb / Market Maker Bot (Instant REJECT).
-   - **Hedged Rate > 3.0%**: Ratio distortion & hedge order execution failure risk (Instant REJECT for $100 Bankroll).
-   - **P/L Ratio < 0.3**: Liquidation risk - winning pennies, losing dollars (Instant REJECT).
-   - **Markets < 20**: Short track record / lucky streak risk (Instant REJECT).
-   - **Avg Invest > $300 USD**: Whale trade sizing friction for $100 bankrolls (Instant REJECT).
+<!-- SCORING-SPEC:BEGIN -->
 
-2. **Calculate Continuous Weighted 100-Point Score**:
-   - **Slippage Cost Rate (20%)**: `(Actual - Copy) / |Actual| < 10%` (20 pts, degrades to 0 at 60%).
-   - **Recent 20 PnL & Slip (15%)**: `> $1k & <5% slip` (15 pts), `Recent PnL <= $0` (0 pts).
-   - **Hedged Control (15%)**: `< 3.0%` (15 pts), `> 3.0%` (0 pts & REJECT).
-   - **Daily Green Rate (15%)**: `> 85% green` (15 pts), continuous slope `40%..85%`.
-   - **Recent 20 Win Rate (10%)**: `> 75%` (10 pts), continuous slope `35%..75%`.
-   - **Avg Profit/Loss Ratio (10%)**: `> 3.0` (10 pts), `< 0.3` (0 pts & REJECT).
-   - **PnL / Volume Ratio (5%)**: `> 30%` (5 pts), continuous slope `0%..30%`.
-   - **Markets Sample Size (5%)**: `> 200` (5 pts), `< 20` (0 pts & REJECT).
-   - **Continuous Sizing Fit (5%)**: `$25 Peak Optimal` (5 pts), `> $300` (0 pts & REJECT).
+### Scoring Engine — Gates, Parameters and Tiers
 
-3. **Letter Grade Assignment**:
-   - **90 – 100 Pts**: **S-Tier** (God-Tier Target)
-   - **80 – 89 Pts**: **A-Tier** (Strong Copy Target)
-   - **70 – 79 Pts**: **B-Tier** (Moderate / High Volatility)
-   - **50 – 69 Pts**: **C-Tier** (High Risk / Drawdown)
-   - **< 50 Pts**: **F-Tier / REJECT** (Toxic / Disqualified)
+> This section is generated from `app/src/screener/score_wallets.py` via
+> `tools/scoring_docs.py`. Do not edit it by hand — change the code and run
+> `python tools/scoring_docs.py generate`, or CI will fail the drift check.
 
-4. **Data Evidence Requirement**: Present the numerical breakdown for all 9 weighted parameters alongside the final grade.
+#### Hard Rejection Gates (instant disqualification, never traded off)
+
+| Gate | Condition | Why |
+| :--- | :--- | :--- |
+| PolyCop Site Score sanity floor | `< 40 / 100` | stops manually pasted garbage from being scored once the leaderboard pre-filter is gone |
+| Toxic Copy Poison | `Copy PnL < $0` | a modelled copy that loses money is not a target |
+| Slippage Cost Rate | `> 5.0% modelled` | roughly 21% real under the Friction Realism Multiplier (ADR 0001) |
+| Hedged Rate | `> 3.0%` | market-making signature and doubled friction legs |
+| Profit/Loss Ratio | `< 0.3` | winning pennies, losing dollars |
+| Markets Sample | `< 20` | a streak, not a track record |
+| Whale Avg Invest | `> $200` | a typical trade that dwarfs the bankroll cannot be mirrored |
+| Divergence | `r20_pnl < $0 while actual_pnl > $1,000` | a dead edge must not be carried by history |
+
+#### Continuous Parameters (100 points total)
+
+| Parameter | Points | Zero points | Full marks |
+| :--- | :---: | :--- | :--- |
+| Edge-to-Friction Ratio | 22 | <= 1.0 (break-even) | >= 3.0 — edge per dollar of friction; the cheapest disqualifying arithmetic runs first |
+| Slippage Cost Rate | 15 | >= 5.0% | <= 1.0% — modelled, before the Friction Realism Multiplier |
+| Drawdown Depth | 12 | >= 0.50 of peak | 0.0 — from the lifetime equity curve |
+| Copyable Window Share | 10 | 0% | 100% — share of trades the Copyable Trade Window admits |
+| Recent Form | 10 | PnL <= $0 or slip unmeasured | >= 100% return over the recent-20 window at 0% slip — return on deployed capital, judged against the friction it came through (ADR 0004) |
+| Daily Green Rate | 8 | < 40% or fewer than 10 observed days | >= 85% — copy-adjusted, measured from real per-day simulated results |
+| Profit/Loss Ratio | 8 | <= 0.3 | >= 3.0 |
+| Sizing Fit | 5 | outside the Copyable Trade Window | at the window midpoint — peak derived from the Copy Execution Profile, never hand-picked |
+| Hedged Control | 5 | >= 3.0% | 0% |
+| Markets Sample | 3 | < 20 | >= 200 |
+| Capital Efficiency | 2 | 0 | >= 30 PnL/volume ratio |
+
+#### Copyability Score Tier Bands (triage only — verdicts come from simulation)
+
+| Tier | Score |
+| :--- | :--- |
+| S-Tier (God-Tier Target) | &ge; 72 |
+| A-Tier (Strong Copy Target) | &ge; 65 |
+| B-Tier (Moderate Copy Target) | &ge; 60 |
+| C-Tier (High Risk / Volatile) | &ge; 50 |
+| F-Tier (Toxic / Rejection) | < 50 |
+
+#### Simulated Verdict Tier Bands (Edge Retention — the verdict)
+
+| Tier | Edge Retention |
+| :--- | :--- |
+| S-Tier (God-Tier Target) | &ge; 0.85 |
+| A-Tier (Strong Copy Target) | &ge; 0.70 |
+| B-Tier (Moderate Copy Target) | &ge; 0.50 |
+| C-Tier (High Risk / Volatile) | &ge; 0.30 |
+| F-Tier / REJECT | < 0.30 |
+
+<!-- SCORING-SPEC:END -->
+
+**Data Evidence Requirement**: Present the numerical breakdown for every weighted parameter alongside the final grade, as the engine reports it in `breakdown`.
 
 ### Response Formatting Rules
 1. **No Time Estimates**: Do NOT include minute counts or time duration estimates (e.g., mins count) in responses.

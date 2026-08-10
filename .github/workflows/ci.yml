@@ -37,6 +37,14 @@ jobs:
           --ignore=tests/verify_web_app_live.py \
           --deselect tests/test_proxy_server_latency.py::test_proxy_latency_discovery
 
+    # The documented gate values and point weights are generated from the code's
+    # SCORING_SPEC. This step fails when a doc drifts from the code, so the four
+    # contradictions that previously lived in the docs cannot silently return.
+    # Runs on both pushes to main and pull requests, which this workflow triggers on.
+    - name: Verify Scoring Docs Match the Code
+      run: |
+        python tools/scoring_docs.py check
+
     - name: Verify Web App Entry Point
       run: |
         python screen.py --test

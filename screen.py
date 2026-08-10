@@ -21,9 +21,7 @@ VERIFIED_DATA_FILE = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from pipeline.phase1_scrape_leaderboard import fetch_and_scrape_leaderboard
-from pipeline.phase2_filter_targets import run_phase2_filter
-from pipeline.phase3_simulation_rank import run_phase3_simulation_rank
+from pipeline.orchestrator import run_pipeline
 from server.serve_web_app import start_server, PORT
 
 def main():
@@ -40,9 +38,7 @@ def main():
         print("\n[PIPELINE] Serve-only mode requested. Skipping wallet scan pipeline.")
     elif force_rescan or not os.path.exists(VERIFIED_DATA_FILE):
         print("\n[PIPELINE] Dataset missing or rescan requested. Running pipeline...")
-        fetch_and_scrape_leaderboard()
-        run_phase2_filter()
-        run_phase3_simulation_rank()
+        run_pipeline()
     else:
         print(f"\n[PIPELINE] Verified dataset found: {VERIFIED_DATA_FILE}")
 

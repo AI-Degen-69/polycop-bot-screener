@@ -94,7 +94,12 @@ The spec must state the order explicitly: apply the reject-if-negative-at-10% ga
 compute retention only on wallets that survive it, where both terms are positive and the ratio means
 what it claims. Retention must never be computed on a negative denominator.
 
-## Open question for the spec
+## Open question for the spec — answered by spike 0002
+
+**Resolved.** See `0002-run-mock-field-semantics.md`. The reconciliation found that `action`, not
+`type`, partitions the log; that `intercepted` counts exits the follower *missed*; that
+`total_trades` counts markets; and that `len(logs)` is the target's trade count. The question as
+posed below is kept verbatim for the record.
 
 `intercepted` is 46 while the log holds 46 `INTERCEPT` entries plus 56 `SKIP_FILTER` entries, and
 `total_trades` is 3 against 4 `BUY` and 2 `SELL` log lines. Neither field is a plain count of the

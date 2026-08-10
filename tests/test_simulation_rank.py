@@ -1,6 +1,78 @@
+import os
+import sys
+
 import pytest
-from app.src.execution.copy_execution_profile import CURRENT_PROFILE
-from app.src.pipeline.phase3_simulation_rank import run_phase3_simulation_rank
+
+SCRIPT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app", "src"))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
+from pipeline.phase3_simulation_rank import (  # noqa: E402
+    DATA_DIR,
+    assign_simulated_tier,
+    run_phase3_simulation_rank,
+)
+from screener.score_wallets import (  # noqa: E402
+    SIM_TIER_A_MIN,
+    SIM_TIER_B_MIN,
+    SIM_TIER_C_MIN,
+    SIM_TIER_S_MIN,
+)
+
+def test_the_simulated_verdict_bands_are_the_documented_constants():
+    """The tier a reader sees is assigned by the same constants the docs render.
+
+    ADR 0002 makes simulation the verdict; these bands are that verdict's
+    source of truth, so the boundary behaviour is pinned to the constants
+    rather than to prose.
+    """
+    assert assign_simulated_tier(SIM_TIER_S_MIN, 100.0) == "S-Tier (God-Tier Target)"
+    assert assign_simulated_tier(SIM_TIER_A_MIN, 100.0) == "A-Tier (Strong Copy Target)"
+    assert assign_simulated_tier(SIM_TIER_B_MIN, 100.0) == "B-Tier (Moderate Copy Target)"
+    assert assign_simulated_tier(SIM_TIER_C_MIN, 100.0) == "C-Tier (High Risk / Volatile)"
+    assert assign_simulated_tier(SIM_TIER_C_MIN - 0.01, 100.0) == "F-Tier / REJECT"
+
+
+def test_a_non_positive_simulated_pnl_or_absent_retention_rejects():
+    assert assign_simulated_tier(0.99, 0.0) == "F-Tier / REJECT"
+    assert assign_simulated_tier(None, 100.0) == "F-Tier / REJECT"
+
+
+def test_scan_rank_is_stamped_from_the_final_ordering():
+    """Rank within the scan is read off the published order, 1-based.
+
+    Stamped after sorting so it always matches the order the feed ships,
+    including on the degraded path where the fallback ordering differs.
+    """
+    def ok_fetcher(payload):
+        return {"sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else 80.0, "target_total_pnl": 500.0, "logs": [{"type": "INTERCEPT"}]}
+
+    out = run_phase3_simulation_rank(
+        targets=[
+            {"address": "0x1111", "name": "T1", "final_score": 70.0, "grade": "B-Tier", "metrics": {"avg_invest": 25.0}},
+            {"address": "0x2222", "name": "T2", "final_score": 90.0, "grade": "S-Tier", "metrics": {"avg_invest": 25.0}},
+        ],
+        profile=CURRENT_PROFILE,
+        fetcher=ok_fetcher,
+    )
+    assert [r["scan_rank"] for r in out["simulated_targets"]] == [1, 2]
+
+    # The degraded path ranks by triage score, and the rank follows that order.
+    def failing_fetcher(payload):
+        raise RuntimeError("Network down")
+
+    degraded = run_phase3_simulation_rank(
+        targets=[
+            {"address": "0x1111", "name": "T1", "final_score": 70.0, "grade": "B-Tier", "metrics": {"avg_invest": 25.0}},
+            {"address": "0x2222", "name": "T2", "final_score": 90.0, "grade": "S-Tier", "metrics": {"avg_invest": 25.0}},
+        ],
+        profile=CURRENT_PROFILE,
+        fetcher=failing_fetcher,
+    )
+    assert [r["address"] for r in degraded["simulated_targets"]] == ["0x2222", "0x1111"]
+    assert [r["scan_rank"] for r in degraded["simulated_targets"]] == [1, 2]
+
 
 def test_simulation_rank_ordering_and_tier_assignment():
     """Verify targets are ranked by edge retention and assigned simulated tiers."""
@@ -72,7 +144,7 @@ def _triage_target(address, **overrides):
         "grade": "A-Tier (Strong Copy Target)",
         "is_hidden_gem": True,
         "activity": {"hours_since_active": 3.0, "trades_7d": 12},
-        "breakdown": {"1. Edge-to-Friction Ratio (22%)": 18.0},
+        "breakdown": {"edge_to_friction": 18.0},
         "bankroll_analysis": {"min_target_order_floor_usd": 8.33},
         "metrics": {"avg_invest": 100.0, "polycop_site_score": 70.0},
     }
@@ -207,3 +279,57 @@ def test_the_feed_states_the_profile_its_numbers_were_computed_under():
     assert profile["bankroll_usd"] == CURRENT_PROFILE.bankroll_usd
     assert profile["copy_ratio"] == CURRENT_PROFILE.copy_ratio
     assert profile["fingerprint"] == CURRENT_PROFILE.fingerprint
+
+
+def test_a_fixture_run_never_touches_the_live_feed_file():
+    """Fixture-driven runs (all of the tests here) must not write the feed the
+
+    web app serves. An earlier version wrote unconditionally, so every
+    test-suite run clobbered app/data/phase3_simulated_targets.json with
+    synthetic wallets. The production path (targets=None, reading Phase 2)
+    is the only one allowed to publish.
+    """
+    feed = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
+    before = open(feed, "rb").read() if os.path.exists(feed) else None
+
+    run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+
+    after = open(feed, "rb").read() if os.path.exists(feed) else None
+    assert after == before, "a fixture run rewrote the live feed file"
+
+
+def test_the_production_path_publishes_the_feed(tmp_path, monkeypatch):
+    """The run that reads Phase 2 must actually write the feed.
+
+    Only the negative half of this rule was pinned, and the guard that
+    enforced it asked `targets is None` after `targets` had already been
+    filled in from the Phase 2 file — so it was never true on the path that
+    publishes, and a real scan silently left the web app serving whatever
+    was there before.
+    """
+    import json
+
+    import pipeline.phase3_simulation_rank as phase3
+
+    monkeypatch.setattr(phase3, "DATA_DIR", str(tmp_path))
+    phase2 = tmp_path / "phase2_verified_targets.json"
+    phase2.write_text(
+        json.dumps({"verified_targets": [_triage_target("0x1111")]}), encoding="utf-8"
+    )
+
+    summary = phase3.run_phase3_simulation_rank(
+        profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+
+    feed = tmp_path / "phase3_simulated_targets.json"
+    assert feed.exists(), "the production path did not publish the feed"
+    published = json.loads(feed.read_text(encoding="utf-8"))
+    assert published["total_targets_evaluated"] == 1
+    # Not object equality: JSON renders the sweep's float slippage keys as
+    # strings, so the published copy differs from the in-memory one there.
+    assert [t["address"] for t in published["simulated_targets"]] == [
+        t["address"] for t in summary["simulated_targets"]
+    ]
+    assert published["simulated_targets"][0]["tier"] == summary["simulated_targets"][0]["tier"]
