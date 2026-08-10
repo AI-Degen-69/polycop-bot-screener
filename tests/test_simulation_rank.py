@@ -298,3 +298,38 @@ def test_a_fixture_run_never_touches_the_live_feed_file():
 
     after = open(feed, "rb").read() if os.path.exists(feed) else None
     assert after == before, "a fixture run rewrote the live feed file"
+
+
+def test_the_production_path_publishes_the_feed(tmp_path, monkeypatch):
+    """The run that reads Phase 2 must actually write the feed.
+
+    Only the negative half of this rule was pinned, and the guard that
+    enforced it asked `targets is None` after `targets` had already been
+    filled in from the Phase 2 file — so it was never true on the path that
+    publishes, and a real scan silently left the web app serving whatever
+    was there before.
+    """
+    import json
+
+    import pipeline.phase3_simulation_rank as phase3
+
+    monkeypatch.setattr(phase3, "DATA_DIR", str(tmp_path))
+    phase2 = tmp_path / "phase2_verified_targets.json"
+    phase2.write_text(
+        json.dumps({"verified_targets": [_triage_target("0x1111")]}), encoding="utf-8"
+    )
+
+    summary = phase3.run_phase3_simulation_rank(
+        profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+
+    feed = tmp_path / "phase3_simulated_targets.json"
+    assert feed.exists(), "the production path did not publish the feed"
+    published = json.loads(feed.read_text(encoding="utf-8"))
+    assert published["total_targets_evaluated"] == 1
+    # Not object equality: JSON renders the sweep's float slippage keys as
+    # strings, so the published copy differs from the in-memory one there.
+    assert [t["address"] for t in published["simulated_targets"]] == [
+        t["address"] for t in summary["simulated_targets"]
+    ]
+    assert published["simulated_targets"][0]["tier"] == summary["simulated_targets"][0]["tier"]

@@ -111,7 +111,13 @@ def run_phase3_simulation_rank(
     if profile is None:
         profile = CURRENT_PROFILE
 
-    if targets is None:
+    # Whether this run is the production path, decided before `targets` is
+    # filled in from the Phase 2 file. Asking `targets is None` after that
+    # point answers "did the file happen to be empty", not "who supplied the
+    # targets", and the two diverge on exactly the run that publishes.
+    publishes_feed = targets is None
+
+    if publishes_feed:
         in_file = os.path.join(DATA_DIR, "phase2_verified_targets.json")
         if os.path.exists(in_file):
             with open(in_file, "r", encoding="utf-8") as f:
@@ -221,7 +227,7 @@ def run_phase3_simulation_rank(
     # targets — every test in this repo — must not touch the live data dir;
     # an earlier version wrote unconditionally and every test-suite run
     # clobbered the feed with fixture wallets.
-    if targets is None:
+    if publishes_feed:
         out_file = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
         try:
             with open(out_file, "w", encoding="utf-8") as f:
