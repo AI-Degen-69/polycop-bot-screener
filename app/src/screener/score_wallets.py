@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
 import json
+import os
 import sys
 
-def calculate_bankroll_optimized_score(metrics, user_capital=100.0):
+SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+from execution.copy_execution_profile import CURRENT_PROFILE
+
+# Whale gate: a target whose typical trade dwarfs the bankroll cannot be mirrored at
+# any sane participation rate. A screening gate rather than a bot setting, so it is
+# not part of the Copy Execution Profile.
+WHALE_AVG_INVEST_LIMIT_USD = 300.0
+
+def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRENT_PROFILE):
     """
-    PolyCop $100 Bankroll Continuous Linear Screener Engine.
-    Incorporates PolyCop AI Analysis Rules, $100 Capital Sizing, $5.00 Max Position Cap, and Losing Streak Protection.
-    
+    PolyCop Continuous Linear Screener Engine, run under one Copy Execution Profile.
+    Incorporates PolyCop AI Analysis Rules, profile-derived sizing, and Losing Streak Protection.
+
+    Every execution figure - bankroll, copy ratio, position cap, Sizing Fit peak and the
+    minimum-order floor - is read from `profile`. Passing `user_capital` restates the
+    same profile at a different bankroll.
+
     HARD REJECTION GATES (INSTANT DISQUALIFICATION):
     1. PolyCop Site Score <= 60 -> Low Quality / Under-rated / Toxic target.
     2. Backtest Copy PnL < $0 -> Toxic Copy Poison.
@@ -18,6 +34,9 @@ def calculate_bankroll_optimized_score(metrics, user_capital=100.0):
     8. Recent 20 Win Rate < 45.0% -> Severe Losing Streak / Drawdown Risk.
     9. High Frequency Friction Sensitivity (mkts > 300 & slip_cost_rate > 5.0%) -> HFT bot liquidation risk.
     """
+    if user_capital is not None:
+        profile = profile.with_bankroll(user_capital)
+
     score = 0.0
     breakdown = {}
     rejection_reasons = []
@@ -50,13 +69,13 @@ def calculate_bankroll_optimized_score(metrics, user_capital=100.0):
     if slip_cost_rate > 0.20:
         rejection_reasons.append(f"Slippage Cost Rate {slip_cost_rate*100:.1f}% > 20.0% max limit (Excessive friction)")
     if hedged > 3.0:
-        rejection_reasons.append(f"Hedged Rate {hedged}% > 3.0% ($100 Bankroll ratio distortion / arb risk)")
+        rejection_reasons.append(f"Hedged Rate {hedged}% > 3.0% (${profile.bankroll_usd:.0f} Bankroll ratio distortion / arb risk)")
     if pl_ratio < 0.3:
         rejection_reasons.append(f"P/L Ratio {pl_ratio:.2f}x < 0.3x (Liquidation Risk - Winning Pennies, Losing Dollars)")
     if mkts < 20:
         rejection_reasons.append(f"Short Track Record ({int(mkts)} markets < 20 min threshold)")
-    if avg_inv > 300.0:
-        rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > $300) - Severe $100 bankroll scaling friction")
+    if avg_inv > WHALE_AVG_INVEST_LIMIT_USD:
+        rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > ${WHALE_AVG_INVEST_LIMIT_USD:.0f}) - Severe ${profile.bankroll_usd:.0f} bankroll scaling friction")
     if r20_wr < 45.0:
         rejection_reasons.append(f"Recent Win Rate {r20_wr:.1f}% < 45% (High Losing Streak / Drawdown Risk)")
     if mkts > 300 and slip_cost_rate > 0.05:
@@ -138,13 +157,15 @@ def calculate_bankroll_optimized_score(metrics, user_capital=100.0):
     score += mkt_score
     breakdown["8. Markets Sample (5%)"] = round(mkt_score, 2)
 
-    # 9. Target Trader Avg Invest Sizing ($25.00 Peak Fit) (5.00 Pts)
-    if avg_inv <= 25.0:
-        inv_score = 5.0 * max(0.0, avg_inv / 25.0)
+    # 9. Target Trader Avg Invest Sizing (profile Sizing Fit peak) (5.00 Pts)
+    # Full points at the peak, falling linearly to zero where the whale gate bites.
+    sizing_peak = profile.sizing_fit_peak_usd
+    if avg_inv <= sizing_peak:
+        inv_score = 5.0 * max(0.0, avg_inv / sizing_peak)
     else:
-        inv_score = max(0.0, 5.0 * (1.0 - ((avg_inv - 25.0) / (300.0 - 25.0))))
+        inv_score = max(0.0, 5.0 * (1.0 - ((avg_inv - sizing_peak) / (WHALE_AVG_INVEST_LIMIT_USD - sizing_peak))))
     score += inv_score
-    breakdown["9. Continuous Sizing Fit ($25 Peak) (5%)"] = round(inv_score, 2)
+    breakdown[f"9. Continuous Sizing Fit (${sizing_peak:.0f} Peak) (5%)"] = round(inv_score, 2)
 
     # 10. High Entry Price Risk Penalty (Avg Buy Price > $0.85)
     avg_buy_price = float(metrics.get("buy_price", metrics.get("avg_buy_price", 0.0)))
@@ -168,14 +189,13 @@ def calculate_bankroll_optimized_score(metrics, user_capital=100.0):
     else:
         grade = "F-Tier (Toxic / Rejection)"
 
-    # Bankroll Sizing Controls & Caps
-    uncapped_copy_trade = user_capital * 0.03  # 3% scale = $3.00 USD
-    max_single_position_usd = round(min(user_capital * 0.05, 5.00), 2)  # Hard $5.00 cap (5% of bankroll)
-    actual_copy_trade = min(uncapped_copy_trade, max_single_position_usd)
+    # Bankroll Sizing Controls & Caps, all stated by the Copy Execution Profile
+    max_single_position_usd = profile.max_single_position_usd
+    actual_copy_trade = profile.copy_trade_usd
     participation_rate = round((actual_copy_trade / avg_inv) * 100.0, 2) if avg_inv > 0 else 0.0
 
-    # Polymarket $1.00 Minimum Order Limit Floor Calculation
-    min_target_order_for_1usd = round(1.00 / (actual_copy_trade / avg_inv), 2) if avg_inv > 0 and actual_copy_trade > 0 else 0.0
+    # Smallest target order whose mirrored share still clears the venue minimum
+    min_target_order_for_1usd = profile.min_target_order_floor_usd(avg_inv)
 
     return {
         "final_score": final_score,
@@ -183,7 +203,7 @@ def calculate_bankroll_optimized_score(metrics, user_capital=100.0):
         "rejection_reasons": rejection_reasons,
         "breakdown": breakdown,
         "bankroll_analysis": {
-            "available_capital": user_capital,
+            "available_capital": profile.bankroll_usd,
             "target_avg_invest_usd": avg_inv,
             "user_copy_trade_usd": actual_copy_trade,
             "max_single_position_cap_usd": max_single_position_usd,

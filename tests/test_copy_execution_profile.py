@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+import unittest
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+from execution.copy_execution_profile import CURRENT_PROFILE, CopyExecutionProfile
+
+
+class TestProfileFingerprint(unittest.TestCase):
+    """A screening result is valid only for a stated profile, so the profile must
+    be able to state itself in a form that changes when it does."""
+
+    def test_identical_profiles_share_a_fingerprint(self):
+        self.assertEqual(
+            CopyExecutionProfile().fingerprint,
+            CopyExecutionProfile().fingerprint,
+        )
+
+    def test_a_changed_copy_ratio_changes_the_fingerprint(self):
+        self.assertNotEqual(
+            CopyExecutionProfile(copy_ratio=0.03).fingerprint,
+            CopyExecutionProfile(copy_ratio=0.06).fingerprint,
+        )
+
+    def test_every_field_participates_in_the_fingerprint(self):
+        base = CopyExecutionProfile()
+        for field_name, value in base.as_dict().items():
+            bumped = CopyExecutionProfile(**{**base.as_dict(), field_name: value + 1.0})
+            self.assertNotEqual(
+                base.fingerprint,
+                bumped.fingerprint,
+                f"changing {field_name} left the fingerprint untouched",
+            )
+
+    def test_the_fingerprint_survives_a_process_restart(self):
+        # Cached simulation results are keyed on this string. If it depended on
+        # PYTHONHASHSEED every run would miss cache instead of only a profile change
+        # missing it, so compute it in two fresh processes seeded differently.
+        script = (
+            "import sys; sys.path.insert(0, %r);"
+            "from execution.copy_execution_profile import CURRENT_PROFILE;"
+            "print(CURRENT_PROFILE.fingerprint)" % SRC_DIR
+        )
+
+        def fingerprint_under(seed):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            out = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True, text=True, check=True, env=env,
+            )
+            return out.stdout.strip()
+
+        self.assertEqual(fingerprint_under("0"), fingerprint_under("12345"))
+        self.assertEqual(fingerprint_under("0"), CURRENT_PROFILE.fingerprint)
+
+
+class TestCopyableTradeWindow(unittest.TestCase):
+    """The window is the range of target trade sizes the profile actually mirrors."""
+
+    def test_lower_bound_is_the_venue_minimum_divided_by_the_copy_ratio(self):
+        # Below $33.33 a 3% copy order falls under the $1.00 venue minimum.
+        self.assertAlmostEqual(CURRENT_PROFILE.window_min_usd, 33.33, places=2)
+
+    def test_upper_bound_is_the_per_token_cap_divided_by_the_copy_ratio(self):
+        # Above $166.67 a 3% copy order is clipped by the $5.00 per-token cap.
+        self.assertAlmostEqual(CURRENT_PROFILE.window_max_usd, 166.67, places=2)
+
+    def test_a_doubled_copy_ratio_halves_both_bounds(self):
+        doubled = CopyExecutionProfile(copy_ratio=0.06)
+        self.assertAlmostEqual(doubled.window_min_usd, 16.67, places=2)
+        self.assertAlmostEqual(doubled.window_max_usd, 83.33, places=2)
+
+    def test_a_raised_per_token_cap_widens_only_the_upper_bound(self):
+        wider = CopyExecutionProfile(per_token_cap_usd=10.0)
+        self.assertAlmostEqual(wider.window_min_usd, CURRENT_PROFILE.window_min_usd, places=2)
+        self.assertAlmostEqual(wider.window_max_usd, 333.33, places=2)
+
+
+class TestProfileDerivedSizing(unittest.TestCase):
+    """Everything downstream asks the profile rather than carrying its own copy."""
+
+    def test_the_copy_order_is_the_bankroll_share_held_under_the_position_cap(self):
+        self.assertAlmostEqual(CURRENT_PROFILE.copy_trade_usd, 3.00, places=2)
+
+    def test_max_single_position_respects_both_the_cap_and_the_bankroll(self):
+        self.assertAlmostEqual(CURRENT_PROFILE.max_single_position_usd, 5.00, places=2)
+        small = CopyExecutionProfile(bankroll_usd=50.0)
+        self.assertAlmostEqual(small.max_single_position_usd, 2.50, places=2)
+
+    def test_min_target_order_floor_is_where_the_follower_share_reaches_the_venue_minimum(self):
+        # A target averaging $50 draws a $3.00 copy order, a 6% participation rate,
+        # so the smallest target order the follower can still mirror is $1.00 / 6%.
+        self.assertAlmostEqual(
+            CURRENT_PROFILE.min_target_order_floor_usd(50.0), 16.67, places=2
+        )
+
+    def test_min_target_order_floor_is_zero_when_the_target_size_is_unknown(self):
+        self.assertEqual(CURRENT_PROFILE.min_target_order_floor_usd(0.0), 0.0)
+
+    def test_the_current_profile_is_the_one_the_spec_states(self):
+        self.assertEqual(CURRENT_PROFILE.bankroll_usd, 100.0)
+        self.assertEqual(CURRENT_PROFILE.copy_ratio, 0.03)
+        self.assertEqual(CURRENT_PROFILE.per_token_cap_usd, 5.0)
+        self.assertEqual(CURRENT_PROFILE.global_cap_usd, 100.0)
+        self.assertEqual(CURRENT_PROFILE.min_price, 0.05)
+        self.assertEqual(CURRENT_PROFILE.max_price, 0.95)
+
+    def test_a_profile_cannot_be_mutated_after_construction(self):
+        # Results are labelled with a fingerprint; a mutable profile would let the
+        # label and the numbers drift apart mid-run.
+        with self.assertRaises(Exception):
+            CURRENT_PROFILE.bankroll_usd = 250.0
+
+
+if __name__ == "__main__":
+    unittest.main()

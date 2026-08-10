@@ -1,4 +1,4 @@
- Fucking amazing job. You explained well, no bullshit. Love it, subscribed. Really great fucking work. #!/usr/bin/env python3
+#!/usr/bin/env python3
 import json
 import time
 import os
@@ -13,13 +13,17 @@ DATA_DIR = os.path.join(APP_DIR, "data")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
+from execution.copy_execution_profile import CURRENT_PROFILE
 from screener.score_wallets import calculate_bankroll_optimized_score
 from screener.activity import compute_activity, parse_timestamp, summarize_buckets
 
-def run_phase2_filter():
+def run_phase2_filter(profile=CURRENT_PROFILE):
     """
     Phase 2: Takes raw scraped profiles from app/data/phase1_scraped_wallets.json,
     runs the 100-Point Audit Engine (score_wallets.py), and outputs app/data/phase2_verified_targets.json.
+
+    Triage is only valid for one Copy Execution Profile, so the profile is stated once
+    here and passed down rather than restated as literals per call site.
     """
     in_file = os.path.join(DATA_DIR, "phase1_scraped_wallets.json")
     out_file = os.path.join(DATA_DIR, "phase2_verified_targets.json")
@@ -69,7 +73,7 @@ def run_phase2_filter():
             "buy_price": float(p.get("buy_price", p.get("avg_buy_price", 0.0)))
         }
 
-        audit_res = calculate_bankroll_optimized_score(raw_metrics, user_capital=100.0)
+        audit_res = calculate_bankroll_optimized_score(raw_metrics, profile=profile)
 
         if audit_res["rejection_reasons"]:
             rejected_count += 1
