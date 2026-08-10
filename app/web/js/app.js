@@ -300,6 +300,34 @@ function formatShare(value) {
     return (value === null || value === undefined) ? "Not measured" : `${(value * 100).toFixed(0)}%`;
 }
 
+function renderVerdictMetricCell(t, field, label) {
+    // A verdict figure no simulation produced is not a figure of zero: the
+    // row says so, telling a triage-only row from a measured verdict row.
+    const val = t[field];
+    if (t.verdict_source !== "simulation") {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">${label}</span>
+                <span class="summary-val tier-unsimulated">Not simulated</span>
+            </div>
+        `;
+    }
+    if (val === null || val === undefined) {
+        return `
+            <div class="summary-cell">
+                <span class="summary-lbl">${label}</span>
+                <span class="summary-val tier-unsimulated">Not measured</span>
+            </div>
+        `;
+    }
+    return `
+        <div class="summary-cell">
+            <span class="summary-lbl">${label}</span>
+            <span class="summary-val">${val}%</span>
+        </div>
+    `;
+}
+
 function renderTierCell(t) {
     // The letter alone cannot tell a reader whether a simulation produced it.
     // A triage grade shown in a Tier column is the whole failure this page is
@@ -431,6 +459,8 @@ function renderGrid() {
                         <span class="summary-lbl">Copyable Window Share</span>
                         <span class="summary-val">${formatShare(t.copyable_window_share)}</span>
                     </div>
+                    ${renderVerdictMetricCell(t, 'simulated_daily_green_rate', 'Simulated Daily Green')}
+                    ${renderVerdictMetricCell(t, 'simulated_max_drawdown', 'Simulated Drawdown')}
                     <div class="summary-cell">
                         <span class="summary-lbl">Avg Invest</span>
                         <span class="summary-val">$${t.metrics.avg_invest}</span>
@@ -485,6 +515,40 @@ function renderBalanceMiss(target) {
     `;
 }
 
+function renderSkipReasons(target) {
+    // The simulation's decision log, condensed to the refusals — the entries
+    // where an entry signal did not become a copy. The message names the
+    // failing filter, so a reader sees why a trade was skipped rather than
+    // inferring it (spec #13).
+    const host = document.getElementById("modalSkipReasons");
+    if (!host) return;
+
+    if (target.verdict_source !== "simulation") {
+        host.innerHTML = `<div class="bm-empty">No Simulated Copy Run, so no skip log exists.</div>`;
+        return;
+    }
+
+    const reasons = target.skip_reasons || [];
+    if (reasons.length === 0) {
+        host.innerHTML = `<div class="bm-ok">✅ Every entry signal was copied — nothing was skipped.</div>`;
+        return;
+    }
+
+    const actionLabels = { SKIP_FILTER: "Window refused", SKIP_CAP: "Risk cap" };
+    const rows = reasons.slice(0, 12).map(r => `
+        <div class="bm-row sr-row">
+            <span class="bm-market">${escapeHtml(actionLabels[r.action] || r.action)}</span>
+            <span class="bm-amount">${escapeHtml(r.msg || "")}</span>
+        </div>
+    `).join("");
+
+    host.innerHTML = `
+        <div class="bm-headline">⚠️ ${reasons.length} signal${reasons.length === 1 ? "" : "s"} did not become a copy</div>
+        ${rows}
+        ${reasons.length > 12 ? `<div class="bm-empty">…and ${reasons.length - 12} more.</div>` : ""}
+    `;
+}
+
 function openModal(idx) {
     currentModalIndex = idx;
     const target = filteredTargets[idx];
@@ -508,6 +572,7 @@ function openModal(idx) {
     document.getElementById("modalRankBadge").innerText = target.scan_rank ? `#${target.scan_rank}` : "—";
     document.getElementById("modalScreenerScore").innerText = `${target.final_score} / 100 Pts`;
     renderBalanceMiss(target);
+    renderSkipReasons(target);
     document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
     
     // Set correct external profile & platform links

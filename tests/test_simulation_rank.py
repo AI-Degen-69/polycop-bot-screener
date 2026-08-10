@@ -393,6 +393,126 @@ def test_the_feed_publishes_none_at_a_failed_non_gated_level():
     assert row["pnl_by_slippage_level"][10.0] == 80.0
 
 
+def test_the_verdict_side_publishes_green_rate_and_drawdown_from_the_sim():
+    """Issue #26: Daily Green Rate and Drawdown Depth on the verdict side come
+    from the simulation's per-day results, not the leaderboard's lifetime
+    series — a follower's 1 green day of 3 trading days is 33.33%, and the
+    sim's reported drawdown (percent) is published as measured.
+    """
+    def fetcher(payload):
+        return {
+            "sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else 80.0,
+            "target_total_pnl": 500.0,
+            "winning_days": 1,
+            "losing_days": 2,
+            "flat_days": 0,
+            "trading_days": 3,
+            "max_drawdown": 7.18,
+            "logs": [{"type": "INTERCEPT"}],
+        }
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "simulation"
+    assert row["simulated_daily_green_rate"] == pytest.approx(33.33)
+    assert row["simulated_trading_days"] == 3
+    assert row["simulated_max_drawdown"] == 7.18
+
+
+def test_the_verdict_side_publishes_skip_reasons_from_the_decision_log():
+    """Spec #13: the simulation's decision log is retained on the reader's
+    side — the refusals arrive with the message naming the failing filter.
+    """
+    def fetcher(payload):
+        logs = [
+            {"action": "SKIP_FILTER",
+             "msg": "[m] Target BUY 10.00 shares @ $0.500. Sim skipped: Target size out of bounds"},
+            {"action": "SKIP_CAP",
+             "msg": "[m] Target BUY 5.00 shares @ $0.600. Sim skipped: risk cap"},
+            {"action": "BUY", "msg": "[m] Target BUY 3.00 shares @ $0.500."},
+        ]
+        return {
+            "sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else 80.0,
+            "target_total_pnl": 500.0,
+            "logs": logs,
+        }
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert [r["action"] for r in row["skip_reasons"]] == ["SKIP_FILTER", "SKIP_CAP"]
+    assert "Target size out of bounds" in row["skip_reasons"][0]["msg"]
+
+
+def test_absent_sim_figures_stay_absent_on_the_verdict_side():
+    """A response without per-day results or a drawdown reports nothing, not
+    zero: a 0% green rate or a 0.0% drawdown would be fabricated verdicts.
+    """
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=_ok_fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["simulated_daily_green_rate"] is None
+    assert row["simulated_trading_days"] == 0
+    assert row["simulated_max_drawdown"] is None
+    assert row["skip_reasons"] == []
+
+
+def test_a_malformed_verdict_field_does_not_crash_the_scan():
+    """A malformed upstream figure (e.g. `max_drawdown: "N/A"`) reads as
+    unmeasured on the verdict side rather than crashing the whole scan or
+    fabricating a number.
+    """
+    def fetcher(payload):
+        return {
+            "sim_total_pnl": 100.0 if payload["slippage"] == 2.0 else 80.0,
+            "target_total_pnl": 500.0,
+            "winning_days": 1,
+            "losing_days": 2,
+            "flat_days": 0,
+            "trading_days": 3,
+            "max_drawdown": "N/A",
+            "logs": [{"type": "INTERCEPT"}],
+        }
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")], profile=CURRENT_PROFILE, fetcher=fetcher
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "simulation"
+    assert row["simulated_daily_green_rate"] == pytest.approx(33.33)
+    assert row["simulated_max_drawdown"] is None
+
+
+def test_a_degraded_run_publishes_no_verdict_metrics():
+    """The triage fallback carries none of the verdict-side figures: there is
+    no simulation, so nothing is fabricated in their place.
+    """
+    def failing_fetcher(payload):
+        raise RuntimeError("Network down")
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=failing_fetcher,
+        endpoint_failure_threshold=1,
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "triage"
+    assert row["simulated_daily_green_rate"] is None
+    assert row["simulated_trading_days"] == 0
+    assert row["simulated_max_drawdown"] is None
+    assert row["skip_reasons"] == []
+
+
 def test_a_sweep_exception_counts_toward_the_failure_streak(monkeypatch):
     """A sweep that raises (an unexpected error, not a failed fetch) is the
     same endpoint signal: it counts toward the outage streak and formats the

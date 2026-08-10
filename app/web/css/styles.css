@@ -1345,3 +1345,25 @@ header {
     color: #f59e0b;
     font-variant-numeric: tabular-nums;
 }
+
+/* --- Skip Reasons: the decision log's refusals, stacked so the message wraps --- */
+.sr-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
+}
+
+.sr-row .bm-market {
+    color: #67e8f9;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.sr-row .bm-amount {
+    color: #cbd5e1;
+    font-weight: 400;
+    white-space: normal;
+    word-break: break-word;
+}

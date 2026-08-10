@@ -13,7 +13,11 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from execution.copy_execution_profile import CURRENT_PROFILE
-from screener.simulated_copy_run import calculate_copyable_window_share
+from screener.simulated_copy_run import (
+    calculate_copyable_window_share,
+    extract_skip_reasons,
+    parse_simulated_run_response,
+)
 from screener.score_wallets import SIM_TIER_A_MIN, SIM_TIER_B_MIN, SIM_TIER_C_MIN, SIM_TIER_S_MIN
 from screener.slippage_sweep import run_slippage_sensitivity_sweep
 
@@ -201,6 +205,20 @@ def run_phase3_simulation_rank(
         res_10 = sweep_out.get("sweep_results", {}).get(10.0, {}).get("data", {})
         window_share = calculate_copyable_window_share(res_10) if res_10 else None
 
+        # Verdict-side figures from the same 10% run (issue #26): the spec
+        # wants Daily Green Rate and Drawdown Depth to describe the follower's
+        # simulation, not the target's leaderboard lifetime, and the decision
+        # log retained so a reader can see why a trade was skipped.
+        sim_parsed = parse_simulated_run_response(res_10) if res_10 else None
+        trading_days = sim_parsed["trading_days"] if sim_parsed else 0
+        if sim_parsed is not None and trading_days > 0:
+            # A rate drawn from zero days is not a rate of zero; it is nothing
+            # measured (the triage side refuses the same way via MIN_OBSERVED_DAYS).
+            daily_green = round((sim_parsed["winning_days"] / float(trading_days)) * 100.0, 2)
+        else:
+            daily_green = None
+        sim_drawdown = sim_parsed["max_drawdown"] if sim_parsed else None
+
         entry = _carry_through_triage(target)
         entry.update({
             # The tier a simulation produced, labelled as such. A reader cannot
@@ -212,6 +230,10 @@ def run_phase3_simulation_rank(
             "edge_retention": round(retention, 4) if retention is not None else None,
             "simulated_copy_pnl_10": round(pnl_10, 2),
             "copyable_window_share": round(window_share, 4) if window_share is not None else None,
+            "simulated_daily_green_rate": daily_green,
+            "simulated_trading_days": trading_days,
+            "simulated_max_drawdown": round(sim_drawdown, 2) if sim_drawdown is not None else None,
+            "skip_reasons": extract_skip_reasons(res_10) if res_10 else [],
             "balance_miss_details": extract_balance_miss(res_10),
             "pnl_by_slippage_level": sweep_out.get("pnl_by_level"),
         })
@@ -241,6 +263,10 @@ def run_phase3_simulation_rank(
                 "edge_retention": None,
                 "simulated_copy_pnl_10": None,
                 "copyable_window_share": None,
+                "simulated_daily_green_rate": None,
+                "simulated_trading_days": 0,
+                "simulated_max_drawdown": None,
+                "skip_reasons": [],
                 "balance_miss_details": [],
                 "pnl_by_slippage_level": None,
             })
