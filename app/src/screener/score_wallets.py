@@ -90,16 +90,20 @@ RECENT_FORM_WINDOW_TRADES = 20.0
 RECENT_FORM_FULL_MARKS_RETURN = 1.0
 
 # Copyability Score tier bands, calibrated against the distribution of a real
-# scored run over the cached leaderboard data (ADR 0005). Absolute, not
-# percentile: a scan full of weak wallets must not manufacture an S-Tier.
-# These bands grade the triage score only; verdicts come from simulation.
-TIER_S_MIN = 72.0
-TIER_A_MIN = 65.0
-TIER_B_MIN = 60.0
-TIER_C_MIN = 50.0
+# scored run over the cached leaderboard data. Originally ADR 0005; re-measured
+# and scaled after the #23 reweight shifted the distribution (ADR 0010) to stop
+# an S-Tier's share of survivors tripling under floors that no longer matched
+# the engine. Absolute, not percentile: a scan full of weak wallets must not
+# manufacture an S-Tier. These bands grade the triage score only; verdicts
+# come from simulation.
+TIER_S_MIN = 80.0
+TIER_A_MIN = 71.0
+TIER_B_MIN = 65.0
+TIER_C_MIN = 56.0
 
 # A Hidden Gem is a wallet the screen grades highly while the leaderboard's own
-# score rates it poorly. Tied to the recalibrated A-Tier floor (ADR 0005).
+# score rates it poorly. Tied to the recalibrated A-Tier floor (ADR 0005, re-measured in
+# ADR 0010).
 GEM_SITE_SCORE_MAX = 75.0
 
 # Simulated Verdict tier bands, on Edge Retention (the share of simulated

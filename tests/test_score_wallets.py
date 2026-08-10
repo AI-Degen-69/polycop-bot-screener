@@ -50,13 +50,14 @@ class TestScoreWalletsEngine(unittest.TestCase):
             "avg_invest": 100.0,
             "markets": 150,
             "polycop_site_score": 85.0,
-            "edge_to_friction": 2.5,
+            "edge_to_friction": 3.0,
             "drawdown_depth": 0.05,
         }
         res = calculate_bankroll_optimized_score(metrics, user_capital=100.0)
         self.assertEqual(len(res["rejection_reasons"]), 0)
-        # Recalibrated tier bands (ADR 0005): a fully measured wallet must clear
-        # the S-Tier floor, which is 72 rather than the inherited 90.
+        # Recalibrated tier bands (ADR 0005, re-measured in ADR 0010): a fully
+        # measured wallet must clear the S-Tier floor, which is 80 rather than
+        # the inherited 90.
         self.assertGreaterEqual(res["final_score"], TIER_S_MIN)
 
     def test_whale_gate_at_200(self):
@@ -286,10 +287,10 @@ class TestRecalibratedTierBands(unittest.TestCase):
     """
 
     def test_the_bands_are_the_recalibrated_absolutes(self):
-        self.assertEqual(TIER_S_MIN, 72.0)
-        self.assertEqual(TIER_A_MIN, 65.0)
-        self.assertEqual(TIER_B_MIN, 60.0)
-        self.assertEqual(TIER_C_MIN, 50.0)
+        self.assertEqual(TIER_S_MIN, 80.0)
+        self.assertEqual(TIER_A_MIN, 71.0)
+        self.assertEqual(TIER_B_MIN, 65.0)
+        self.assertEqual(TIER_C_MIN, 56.0)
 
     def test_each_band_claims_its_score_range(self):
         self.assertIn("S-Tier", grade_for_score(TIER_S_MIN))

@@ -425,7 +425,7 @@ function renderGrid() {
                 <span class="badge-gem">💎 GEM</span>
                 <div class="gem-tooltip-text">
                     <strong>💎 Hidden Gem Detected!</strong><br>
-                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;65)</strong>!
+                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;71)</strong>!
                 </div>
             </div>
         ` : '';

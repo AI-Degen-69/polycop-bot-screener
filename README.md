@@ -98,11 +98,11 @@ source of truth) — never edit this section by hand, and CI fails if it drifts 
 
 | Tier | Score |
 | :--- | :--- |
-| S-Tier (God-Tier Target) | &ge; 72 |
-| A-Tier (Strong Copy Target) | &ge; 65 |
-| B-Tier (Moderate Copy Target) | &ge; 60 |
-| C-Tier (High Risk / Volatile) | &ge; 50 |
-| F-Tier (Toxic / Rejection) | < 50 |
+| S-Tier (God-Tier Target) | &ge; 80 |
+| A-Tier (Strong Copy Target) | &ge; 71 |
+| B-Tier (Moderate Copy Target) | &ge; 65 |
+| C-Tier (High Risk / Volatile) | &ge; 56 |
+| F-Tier (Toxic / Rejection) | < 56 |
 
 #### Simulated Verdict Tier Bands (Edge Retention — the verdict)
 
