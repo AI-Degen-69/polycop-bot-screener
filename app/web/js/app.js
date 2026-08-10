@@ -17,6 +17,15 @@ const ACTIVITY_MAX_HOURS = { live: 6, today: 24, d3: 72, d7: 168 };
 // of silently skipping them.
 const COPY_READY_FLOOR_USD = 25.0;
 
+// Defence-in-depth: market titles arrive from a third-party API via the
+// pipeline. Escaping before innerHTML insertion prevents stored XSS if that
+// source is ever compromised or returns unexpected markup.
+function escapeHtml(str) {
+    const el = document.createElement("span");
+    el.textContent = str;
+    return el.innerHTML;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     loadDataset();
     document.getElementById("searchInput")?.addEventListener("input", filterAndRender);
@@ -440,7 +449,7 @@ function renderBalanceMiss(target) {
 
     const rows = missed.slice(0, 12).map(l => `
         <div class="bm-row">
-            <span class="bm-market">${l.market || "Unnamed market"}</span>
+            <span class="bm-market">${escapeHtml(l.market || "Unnamed market")}</span>
             <span class="bm-amount">${l.amount !== undefined ? `$${Number(l.amount).toFixed(2)}` : ""}</span>
         </div>
     `).join("");
