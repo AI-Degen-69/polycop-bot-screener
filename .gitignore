@@ -25,3 +25,6 @@ Thumbs.db
 
 # Dependencies
 node_modules/
+.freebuff/desktop-v2.db
+.freebuff/desktop-v2.db-shm
+.freebuff/desktop-v2.db-wal
