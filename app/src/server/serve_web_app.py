@@ -200,6 +200,12 @@ def _dispatch(path, query=""):
                 # error, not a crash in the request thread.
                 endpoint = globals()[handler_name]
                 return endpoint(path, query)
+            except json.JSONDecodeError as e:
+                # A corrupt or truncated scan file on disk is a server fault,
+                # not a bad request. JSONDecodeError subclasses ValueError, so
+                # it has to be caught before the client-error branch or the
+                # page shows "bad request" for a request that was fine.
+                return (500, {"error": f"Scan data could not be read: {e}"})
             except ValueError as e:
                 # A client error: the request itself is wrong.
                 return (400, {"error": str(e)})

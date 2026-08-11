@@ -36,11 +36,11 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 | Slippage Cost Rate | 17 | >= 5.0% | <= 1.0% — modelled, before the Friction Realism Multiplier |
 | Drawdown Depth | 13 | >= 0.50 of peak | 0.0 — from the lifetime equity curve |
 | Recent Form | 11 | PnL <= $0 or slip unmeasured | >= 100% return over the recent-20 window at 0% slip — return on deployed capital, judged against the friction it came through (ADR 0004) |
-| Daily Green Rate | 9 | < 40% or fewer than 10 observed days | >= 85% — copy-adjusted, measured from real per-day simulated results |
+| Daily Green Rate | 9 | <= 40% or fewer than 10 observed days | >= 85% — copy-adjusted, measured from real per-day simulated results |
 | Profit/Loss Ratio | 9 | <= 0.3 | >= 3.0 |
 | Sizing Fit | 6 | outside the Copyable Trade Window | at the window midpoint — peak derived from the Copy Execution Profile, never hand-picked |
 | Hedged Control | 6 | >= 3.0% | 0% |
-| Markets Sample | 3 | < 25 | >= 200 |
+| Markets Sample | 3 | <= 25 | >= 200 |
 | Capital Efficiency | 2 | 0 | >= 30 PnL/volume ratio |
 
 #### Copyability Score Tier Bands (triage only — verdicts come from simulation)

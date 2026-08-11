@@ -109,9 +109,9 @@ class TestCapBacktestEndpoint(unittest.TestCase):
             status, body = self._get("/api/cap_backtest?wallet=0xabcdef1234567890&caps=8,25")
         self.assertEqual(status, 200)
         self.assertEqual(body["wallet"], "0xabcdef1234567890")
-        self.assertEqual([l["cap_usd"] for l in body["levels"]], [8.0, 25.0])
+        self.assertEqual([level["cap_usd"] for level in body["levels"]], [8.0, 25.0])
         # The pipeline's tier verdict is stamped on every level.
-        self.assertTrue(all(l["tier"] for l in body["levels"]))
+        self.assertTrue(all(level["tier"] for level in body["levels"]))
 
     def test_bad_caps_return_400_with_a_ui_safe_message(self):
         status, body = self._get("/api/cap_backtest?wallet=0xabcdef1234567890&caps=abc")

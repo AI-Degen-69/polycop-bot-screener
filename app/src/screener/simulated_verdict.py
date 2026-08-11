@@ -38,10 +38,13 @@ class Verdict:
 
     `endpoint_failure` is True when the endpoint did not answer for this
     wallet (ADR 0007); the scan loop counts it toward the outage streak and
-    reads `failure_error` for the fallback reason. `entry` is the feed row
-    to publish, or None when the wallet produced no row — an endpoint
-    failure and a measured rejection both yield None, and only the flag
-    says which.
+    reads `failure_error` for the fallback reason. `failure_error` is also
+    set, with the flag left False, when the endpoint answered but the
+    response could not be read — a data fault the streak must not treat as
+    an outage. `entry` is the feed row to publish, or None when the wallet
+    produced no row — an endpoint failure, an unreadable response and a
+    measured rejection all yield None, and only the flag says whether the
+    endpoint is the suspect.
     """
 
     endpoint_failure: bool
@@ -233,12 +236,17 @@ def verdict_for_wallet(
             fetcher=fetcher,
             cache_dir=cache_dir,
         )
-    except Exception as e:
-        # The sweep itself raised — the endpoint did not answer for this
-        # wallet, so it counts against the failure streak.
+    except Exception as e:  # noqa: BLE001 - one bad response must not kill a scan
+        # Not an outage. A dead endpoint never reaches here: the fetch layer
+        # converts a failed request into `success: False`, which the sweep
+        # reports as `endpoint_failure` below. What raises here is a malformed
+        # response or a bug in our own reading of one, and calling that an
+        # endpoint failure would advance the outage streak and publish triage
+        # fallbacks for wallets the endpoint was answering for. It rejects
+        # this one wallet and leaves the streak alone.
         return Verdict(
-            endpoint_failure=True,
-            failure_error=f"Endpoint unavailable: {str(e)}",
+            endpoint_failure=False,
+            failure_error=f"Sweep failed: {e!s}",
             entry=None,
         )
 

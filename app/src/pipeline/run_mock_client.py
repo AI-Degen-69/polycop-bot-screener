@@ -8,7 +8,7 @@ from execution.copy_execution_profile import CURRENT_PROFILE, CopyExecutionProfi
 
 def build_run_mock_payload(
     wallet: str,
-    copy_pct: float = 3.0,
+    copy_pct: Optional[float] = None,
     slippage: float = 10.0,
     capital: float = 100.0,
     limit: int = 4000,
@@ -23,9 +23,16 @@ def build_run_mock_payload(
     from the profile — which is exactly what would have made a widened-cap
     backtest a fiction: the endpoint would keep simulating a $5 position
     however wide the profile claimed the window was.
+
+    `copy_pct` is derived from the same profile for the same reason: a literal
+    default would let a caller who selected a 5% profile simulate a 3% copy
+    ratio against that profile's window and cap fields. An explicit value is
+    still honoured, since a sweep varies one field at a time.
     """
     if profile is None:
         profile = CURRENT_PROFILE
+    if copy_pct is None:
+        copy_pct = profile.copy_ratio * 100.0
     return {
         "wallet": wallet,
         "fetch_mode": "limit",
@@ -82,7 +89,6 @@ def fetch_simulated_copy_run(
 
     payload = build_run_mock_payload(
         wallet=wallet_clean,
-        copy_pct=profile.copy_ratio * 100.0,
         slippage=slippage,
         capital=profile.bankroll_usd,
         profile=profile

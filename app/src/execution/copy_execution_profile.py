@@ -151,10 +151,17 @@ class CopyExecutionProfile:
         cap = float(cap_usd)
         if cap <= 0 or not math.isfinite(cap):
             raise ValueError(f"per-position cap must be positive and finite, got {cap_usd}")
-        share = max(
-            self.max_position_bankroll_fraction,
-            cap / self.bankroll_usd if self.bankroll_usd > 0 else 1.0,
-        )
+        if self.bankroll_usd <= 0:
+            # No share of a non-positive bankroll can make the requested cap
+            # bind: `max_single_position_usd` stays at the bankroll share,
+            # which is zero or negative however high the per-token cap is set.
+            # The derived profile would then be labelled with a cap it never
+            # applied, so the request is refused rather than answered with a
+            # sweep level that was not tested.
+            raise ValueError(
+                f"bankroll_usd must be positive to derive a cap profile, got {self.bankroll_usd}"
+            )
+        share = max(self.max_position_bankroll_fraction, cap / self.bankroll_usd)
         return replace(self, per_token_cap_usd=cap, max_position_bankroll_fraction=share)
 
 

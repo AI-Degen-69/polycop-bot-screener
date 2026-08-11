@@ -192,6 +192,17 @@ class TestPositionCapSweepProfile(unittest.TestCase):
         with self.assertRaises(ValueError):
             CURRENT_PROFILE.with_position_cap(0.0)
 
+    def test_a_non_positive_bankroll_cannot_derive_a_cap_profile(self):
+        # With no bankroll no share makes the requested cap bind:
+        # `max_single_position_usd` stays at the non-positive bankroll share,
+        # so the derived profile would be labelled with a cap it never
+        # applied. (CodeRabbit, PR #34.)
+        from execution.copy_execution_profile import CopyExecutionProfile
+
+        for bankroll in (0.0, -50.0):
+            with self.assertRaises(ValueError):
+                CopyExecutionProfile(bankroll_usd=bankroll).with_position_cap(10.0)
+
     def test_a_non_finite_cap_is_refused(self):
         # NaN passes a `<= 0` guard (comparisons with NaN are False) and would
         # silently produce NaN windows — the repo's non-finite discipline

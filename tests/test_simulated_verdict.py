@@ -46,9 +46,11 @@ def _dead_at(failing_levels):
     return fetcher
 
 
-def test_a_sweep_that_raises_is_an_endpoint_failure_with_no_row(monkeypatch):
-    """ADR 0007 classification, written once: an unexpected sweep error is an
-    endpoint signal that counts toward the outage streak — and never a row."""
+def test_a_sweep_that_raises_is_not_an_endpoint_failure(monkeypatch):
+    """A raised sweep is a data or code fault, never an outage: the fetch
+    layer turns a dead endpoint into `success: False`, so nothing reaching the
+    handler says anything about the endpoint. It rejects the wallet with no
+    row and leaves the outage streak alone (CodeRabbit, PR #34)."""
     import screener.simulated_verdict as simulated_verdict
 
     def exploding_sweep(wallet, **kwargs):
@@ -58,9 +60,26 @@ def test_a_sweep_that_raises_is_an_endpoint_failure_with_no_row(monkeypatch):
 
     verdict = verdict_for_wallet("0x1111", _triage_target("0x1111"), profile=CURRENT_PROFILE)
 
-    assert verdict.endpoint_failure is True
-    assert verdict.failure_error == "Endpoint unavailable: Boom"
+    assert verdict.endpoint_failure is False
+    assert verdict.failure_error == "Sweep failed: Boom"
     assert verdict.entry is None
+
+
+def test_a_malformed_response_does_not_start_the_outage_fallback():
+    """The concrete case behind that classification: a non-numeric PnL raises
+    inside the sweep. Treated as an outage it would advance the failure streak
+    and publish triage fallbacks for wallets the endpoint was answering for."""
+    def malformed_fetcher(payload):
+        return {"sim_total_pnl": {"unexpected": "shape"}, "target_total_pnl": 500.0, "logs": []}
+
+    verdict = verdict_for_wallet(
+        "0x1111", _triage_target("0x1111"),
+        profile=CURRENT_PROFILE, fetcher=malformed_fetcher,
+    )
+
+    assert verdict.endpoint_failure is False
+    assert verdict.entry is None
+    assert "Sweep failed" in (verdict.failure_error or "")
 
 
 def test_an_unmeasured_gated_level_is_an_endpoint_failure():
@@ -117,8 +136,8 @@ def test_a_successful_sweep_yields_the_full_feed_row():
     assert entry["skip_reasons"] == []
     assert entry["balance_miss_details"] == []
     # The cap backtest runs on the scan's default levels and stamps tiers.
-    assert [l["cap_usd"] for l in entry["cap_sweep"]] == [5.0, 10.0, 15.0, 20.0]
-    assert all(l["tier"] for l in entry["cap_sweep"])
+    assert [level["cap_usd"] for level in entry["cap_sweep"]] == [5.0, 10.0, 15.0, 20.0]
+    assert all(level["tier"] for level in entry["cap_sweep"])
 
 
 def test_a_cap_backtest_failure_is_recorded_not_fatal(monkeypatch):
@@ -175,6 +194,6 @@ def test_backtest_wallet_at_caps_runs_one_wallet_at_custom_levels():
         "0x1111", [8.0, 25.0], profile=CURRENT_PROFILE, fetcher=fetcher
     )
 
-    assert [l["cap_usd"] for l in levels] == [8.0, 25.0]
-    assert [l["edge_retention"] for l in levels] == [pytest.approx(0.75)] * 2
-    assert [l["tier"] for l in levels] == ["A-Tier (Strong Copy Target)"] * 2
+    assert [level["cap_usd"] for level in levels] == [8.0, 25.0]
+    assert [level["edge_retention"] for level in levels] == [pytest.approx(0.75)] * 2
+    assert [level["tier"] for level in levels] == ["A-Tier (Strong Copy Target)"] * 2

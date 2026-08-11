@@ -525,10 +525,11 @@ def test_a_degraded_run_publishes_no_verdict_metrics():
     assert row["skip_reasons"] == []
 
 
-def test_a_sweep_exception_counts_toward_the_failure_streak(monkeypatch):
-    """A sweep that raises (an unexpected error, not a failed fetch) is the
-    same endpoint signal: it counts toward the outage streak and formats the
-    fallback reason.
+def test_a_sweep_exception_does_not_degrade_the_scan(monkeypatch):
+    """A sweep that raises is a data or code fault, not an outage: a dead
+    endpoint is already reported as `endpoint_failure` by the fetch layer, so
+    an exception says nothing about the endpoint. It must not degrade the scan
+    into triage fallbacks that claim an outage. (CodeRabbit, PR #34.)
     """
     import pipeline.phase3_simulation_rank as phase3
     import screener.simulated_verdict as simulated_verdict
@@ -545,10 +546,11 @@ def test_a_sweep_exception_counts_toward_the_failure_streak(monkeypatch):
         endpoint_failure_threshold=1,
     )
 
-    assert out["reduced_confidence"] is True
-    assert out["fallback_reason"] == "Endpoint unavailable: Boom"
-    # Neither wallet was simulated; both fall back to triage ordering.
-    assert [t["verdict_source"] for t in out["simulated_targets"]] == ["triage", "triage"]
+    assert out["reduced_confidence"] is False
+    assert out["fallback_reason"] is None
+    # Neither wallet produced a row, and none is invented in their place.
+    assert out["simulated_targets"] == []
+    assert out["simulated_survivors_count"] == 0
 
 
 def test_a_recovered_flake_publishes_no_fallback_reason():
@@ -746,6 +748,32 @@ def test_a_wallet_whose_backtest_errored_is_not_counted(monkeypatch):
     assert out["cap_sweep_backtested"] == 0
 
 
+def test_a_wallet_the_endpoint_failed_at_one_cap_is_not_counted():
+    """A cap level the endpoint did not answer for leaves the wallet without a
+    complete backtest. Reading only the first level counted such a wallet in
+    the denominator the upgrade rate is reported against, even when every
+    later level failed. (CodeRabbit, PR #34.)"""
+    def dead_above_the_baseline(payload):
+        # The headline verdict (the $5 cap) succeeds, so the wallet publishes
+        # a simulated row; every wider cap is an endpoint failure.
+        if payload["sim_max_per_token"] > 5:
+            raise RuntimeError("Network down")
+        pnl = 100.0 if payload["slippage"] == 2.0 else 80.0
+        return {"sim_total_pnl": pnl, "target_total_pnl": 500.0, "logs": [{"type": "INTERCEPT"}]}
+
+    out = run_phase3_simulation_rank(
+        targets=[_triage_target("0x1111")],
+        profile=CURRENT_PROFILE,
+        fetcher=dead_above_the_baseline,
+    )
+    row = out["simulated_targets"][0]
+
+    assert row["verdict_source"] == "simulation"
+    assert any(level.get("endpoint_failure") for level in row["cap_sweep"])
+    assert out["cap_sweep_upgrades"] == []
+    assert out["cap_sweep_backtested"] == 0
+
+
 def test_backtest_wallet_at_caps_runs_one_wallet_at_custom_levels():
     """The web endpoint's single-wallet backtest honours caller-chosen caps,
     stamps the simulated tier per level, and never touches the profile
@@ -760,11 +788,11 @@ def test_backtest_wallet_at_caps_runs_one_wallet_at_custom_levels():
         "0x1111", [8.0, 25.0], profile=CURRENT_PROFILE, fetcher=fetcher
     )
 
-    assert [l["cap_usd"] for l in levels] == [8.0, 25.0]
-    assert [l["edge_retention"] for l in levels] == [pytest.approx(0.75)] * 2
-    assert [l["tier"] for l in levels] == ["A-Tier (Strong Copy Target)"] * 2
+    assert [level["cap_usd"] for level in levels] == [8.0, 25.0]
+    assert [level["edge_retention"] for level in levels] == [pytest.approx(0.75)] * 2
+    assert [level["tier"] for level in levels] == ["A-Tier (Strong Copy Target)"] * 2
     # The window follows the derived cap, not the $5 default.
-    assert [round(l["window_max_usd"], 2) for l in levels] == [
+    assert [round(level["window_max_usd"], 2) for level in levels] == [
         round(CURRENT_PROFILE.with_position_cap(8.0).window_max_usd, 2),
         round(CURRENT_PROFILE.with_position_cap(25.0).window_max_usd, 2),
     ]

@@ -58,7 +58,15 @@ def summarize_cap_upgrades(
     backtested = 0
     for entry in results:
         sweep = entry.get("cap_sweep") or []
-        if not sweep or sweep[0].get("error"):
+        if not sweep or any(
+            level.get("error") or level.get("endpoint_failure") for level in sweep
+        ):
+            # Every level has to be measured before the wallet counts as
+            # backtested: a level the endpoint did not answer for is an
+            # unknown, not a "no upgrade" (ADR 0007). Reading only the first
+            # level let a wallet with no valid cap measurement — or a failure
+            # at a wider cap — enlarge the denominator the upgrade counts are
+            # reported against.
             continue
         backtested += 1
         headline_rank = _tier_rank(entry.get("tier"))
