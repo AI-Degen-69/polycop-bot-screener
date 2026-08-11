@@ -11,9 +11,8 @@ import sys
 import tempfile
 import unittest
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if os.path.join(PROJECT_ROOT, "tools") not in sys.path:
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "tools"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
+from paths import PROJECT_ROOT
 
 import scoring_docs  # noqa: E402
 

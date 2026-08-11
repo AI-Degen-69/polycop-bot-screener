@@ -4,10 +4,8 @@ import subprocess
 import sys
 import unittest
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
+from paths import SRC_DIR
 
 from execution.copy_execution_profile import CURRENT_PROFILE, CopyExecutionProfile
 
@@ -154,6 +152,65 @@ class TestProfileDerivedSizing(unittest.TestCase):
         # label and the numbers drift apart mid-run.
         with self.assertRaises(Exception):
             CURRENT_PROFILE.bankroll_usd = 250.0
+
+
+class TestPositionCapSweepProfile(unittest.TestCase):
+    """A per-position cap sweep needs a profile whose stated cap is the one
+    that binds — otherwise every level simulates the same $5 position."""
+
+    def test_the_current_settings_are_reproduced_at_five_dollars(self):
+        at_five = CURRENT_PROFILE.with_position_cap(5.0)
+        self.assertAlmostEqual(at_five.max_single_position_usd, 5.00, places=2)
+        self.assertAlmostEqual(at_five.window_min_usd, 33.33, places=2)
+        self.assertAlmostEqual(at_five.window_max_usd, 166.67, places=2)
+
+    def test_a_ten_dollar_cap_raises_the_binding_share_and_widens_the_window(self):
+        # Raising only the per-token cap widens nothing (the 5% bankroll rule
+        # binds at $5), so the sweep raises the bankroll share with the cap.
+        at_ten = CURRENT_PROFILE.with_position_cap(10.0)
+        self.assertAlmostEqual(at_ten.max_position_bankroll_fraction, 0.10, places=4)
+        self.assertAlmostEqual(at_ten.max_single_position_usd, 10.00, places=2)
+        self.assertAlmostEqual(at_ten.window_max_usd, 333.33, places=2)
+        self.assertAlmostEqual(at_ten.copy_trade_usd, 3.00, places=2)
+
+    def test_the_copy_order_is_unchanged_across_the_sweep(self):
+        # The cap constrains the maximum position, not the routine copy size.
+        for cap in (5.0, 10.0, 15.0, 20.0):
+            self.assertAlmostEqual(
+                CURRENT_PROFILE.with_position_cap(cap).copy_trade_usd, 3.00, places=2
+            )
+
+    def test_a_wider_cap_gets_its_own_fingerprint(self):
+        # Each cap level must miss cache on its own, or a rescan would serve
+        # the $5 result for every level.
+        self.assertNotEqual(
+            CURRENT_PROFILE.with_position_cap(5.0).fingerprint,
+            CURRENT_PROFILE.with_position_cap(20.0).fingerprint,
+        )
+
+    def test_a_non_positive_cap_is_refused(self):
+        with self.assertRaises(ValueError):
+            CURRENT_PROFILE.with_position_cap(0.0)
+
+    def test_a_non_positive_bankroll_cannot_derive_a_cap_profile(self):
+        # With no bankroll no share makes the requested cap bind:
+        # `max_single_position_usd` stays at the non-positive bankroll share,
+        # so the derived profile would be labelled with a cap it never
+        # applied. (CodeRabbit, PR #34.)
+        from execution.copy_execution_profile import CopyExecutionProfile
+
+        for bankroll in (0.0, -50.0):
+            with self.assertRaises(ValueError):
+                CopyExecutionProfile(bankroll_usd=bankroll).with_position_cap(10.0)
+
+    def test_a_non_finite_cap_is_refused(self):
+        # NaN passes a `<= 0` guard (comparisons with NaN are False) and would
+        # silently produce NaN windows — the repo's non-finite discipline
+        # (PR #28) applies here too.
+        with self.assertRaises(ValueError):
+            CURRENT_PROFILE.with_position_cap(float("nan"))
+        with self.assertRaises(ValueError):
+            CURRENT_PROFILE.with_position_cap(float("inf"))
 
 
 if __name__ == "__main__":

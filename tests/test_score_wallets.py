@@ -3,16 +3,14 @@ import unittest
 import os
 import sys
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
 
 from screener.score_wallets import (
     TIER_A_MIN,
     TIER_B_MIN,
     TIER_C_MIN,
     TIER_S_MIN,
+    TRACK_RECORD_LENGTH_MIN_MARKETS,
     calculate_bankroll_optimized_score,
     calculate_edge_retention,
     grade_for_score,
@@ -83,6 +81,40 @@ class TestScoreWalletsEngine(unittest.TestCase):
         metrics = {"polycop_site_score": 75.0, "actual_pnl": 5000.0, "copy_pnl": 4500.0, "r20_pnl": -200.0}
         res = calculate_bankroll_optimized_score(metrics)
         self.assertTrue(any("Divergence Gate" in r for r in res["rejection_reasons"]))
+
+    def test_track_record_length_rejects_below_the_lifetime_market_floor(self):
+        """Issue #30: a wallet under the lifetime-markets floor is rejected.
+
+        The gate is measured on the lifetime markets field, not the rolling
+        daily activity series: that series is hard-capped at 14 rows, so a
+        slow steady trader with a real record would be wrongly rejected and a
+        one-week frenzy would pass. Lifetime markets is the only lifetime
+        record-depth field the leaderboard provides.
+        """
+        res = calculate_bankroll_optimized_score(_clean_metrics(markets=24))
+        self.assertTrue(any("Track Record Length" in r for r in res["rejection_reasons"]))
+
+    def test_track_record_length_passes_at_and_above_the_floor(self):
+        res = calculate_bankroll_optimized_score(_clean_metrics(markets=25))
+        self.assertFalse(any("Track Record Length" in r for r in res["rejection_reasons"]))
+
+    def test_track_record_length_absence_rejects(self):
+        """A wallet whose trade record cannot be measured is rejected.
+
+        The engine defaults an absent markets figure to zero, which sits below
+        the floor — an unmeasurable record is not a record (the Markets Sample
+        gate's absence semantics, carried into the re-scoped gate).
+        """
+        absent = _clean_metrics()
+        absent.pop("markets")
+        res = calculate_bankroll_optimized_score(absent)
+        self.assertTrue(any("Track Record Length" in r for r in res["rejection_reasons"]))
+
+    def test_the_track_record_length_floor_is_the_recalibrated_constant(self):
+        """The research's ~50-position bar maps to ~23 lifetime markets at the
+        observed ~2.2 trades-per-market density, rounded conservatively to 25;
+        the floor must not drift."""
+        self.assertEqual(TRACK_RECORD_LENGTH_MIN_MARKETS, 25.0)
 
 
 def _clean_metrics(**overrides):
@@ -372,6 +404,72 @@ class TestScaleIsIntact(unittest.TestCase):
         )
         self.assertEqual(len(res["rejection_reasons"]), 0)
         self.assertAlmostEqual(res["final_score"], 100.0, places=1)
+
+
+class TestTheSpecIsTheEngine(unittest.TestCase):
+    """SCORING_SPEC's parameters are executable: the engine awards each row
+    exactly its declared points at that row's full-marks anchors, so a reweight
+    is a one-row edit and the docs regenerate from the same table."""
+
+    def test_every_parameter_awards_exactly_its_spec_points_at_full_marks(self):
+        from screener.score_wallets import SCORING_SPEC
+        from execution.copy_execution_profile import CURRENT_PROFILE
+
+        # The same fully measured ideal wallet as TestScaleIsIntact: every
+        # parameter sits at its full-marks anchor, so each breakdown row must
+        # equal the spec's declared points exactly.
+        res = calculate_bankroll_optimized_score(
+            _clean_metrics(
+                copy_pnl=5000.0,
+                edge_to_friction=3.0,
+                drawdown_depth=0.0,
+                days_win_rate=95.0,
+                observed_days=14,
+                r20_pnl=2000.0,
+                r20_slip=0.0,
+                pl_ratio=4.0,
+                pnl_vol_ratio=30.0,
+                markets=250,
+                avg_invest=CURRENT_PROFILE.sizing_fit_peak_usd,
+            )
+        )
+        for row in SCORING_SPEC["parameters"]:
+            with self.subTest(key=row["key"]):
+                self.assertEqual(res["breakdown"][row["key"]], row["points"])
+
+    def test_every_row_names_a_shape_the_engine_knows(self):
+        from screener.score_wallets import SCORING_SPEC, _SHAPE_FNS
+
+        for row in SCORING_SPEC["parameters"]:
+            with self.subTest(key=row["key"]):
+                self.assertIn(row["shape"], _SHAPE_FNS)
+
+    def test_every_row_scores_a_metric_the_engine_extracts(self):
+        """A row referencing a metric the engine never extracts would score a
+        silent zero forever; the full-marks parity test catches a wiring bug at
+        the max end, this pins the contract at the source."""
+        from screener.score_wallets import SCORING_SPEC
+
+        extracted = {
+            "edge_to_friction", "slip_cost_rate", "drawdown_depth",
+            "r20_pnl", "r20_slip", "avg_invest", "days_win_rate",
+            "observed_days", "pl_ratio", "hedged_pct", "markets",
+            "pnl_vol_ratio",
+        }
+        for row in SCORING_SPEC["parameters"]:
+            with self.subTest(key=row["key"]):
+                # Composite shapes (recent_form) read their inputs directly;
+                # generic shapes declare the one metric they score.
+                if "metric" in row:
+                    self.assertIn(row["metric"], extracted)
+
+    def test_spec_keys_are_unique_and_are_the_breakdown_keys(self):
+        from screener.score_wallets import SCORING_SPEC
+
+        keys = [row["key"] for row in SCORING_SPEC["parameters"]]
+        self.assertEqual(len(keys), len(set(keys)))
+        res = calculate_bankroll_optimized_score(_clean_metrics())
+        self.assertEqual(set(res["breakdown"]), set(keys))
 
 
 if __name__ == "__main__":

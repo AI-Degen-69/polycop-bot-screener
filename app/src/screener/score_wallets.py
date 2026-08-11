@@ -3,9 +3,7 @@ import json
 import os
 import sys
 
-SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from execution.copy_execution_profile import CURRENT_PROFILE
 
@@ -50,8 +48,14 @@ HEDGED_RATE_GATE_PCT = 3.0
 # Profit/Loss Ratio gate: winning pennies, losing dollars.
 PL_RATIO_GATE = 0.3
 
-# Markets Sample gate: fewer markets and the record is a streak, not a track record.
-MARKETS_GATE = 20
+# Track Record Length gate: fewer markets and the record is a streak, not a
+# track record. Measured in lifetime markets — the only lifetime record-depth
+# field the leaderboard provides. The research's ~50-position bar (issue #29)
+# translates to ~23 markets at the observed ~2.2 trades-per-market density;
+# the floor of 25 rounds that up conservatively. The daily activity series is
+# a rolling window that cannot measure lifetime trades, so the lifetime field
+# is the honest measurement (issue #30 re-scope).
+TRACK_RECORD_LENGTH_MIN_MARKETS = 25
 
 # Divergence gate: a dead edge must not be carried by history. Rejects a wallet
 # whose recent form is negative while lifetime performance is strongly positive.
@@ -88,6 +92,29 @@ MIN_OBSERVED_DAYS = 10
 RECENT_FORM_SLIP_CEILING_PCT = 15.0
 RECENT_FORM_WINDOW_TRADES = 20.0
 RECENT_FORM_FULL_MARKS_RETURN = 1.0
+
+# Ramp anchors for the remaining continuous parameters. Each is the single
+# source referenced by both the SCORING_SPEC row (scored value) and the row's
+# generated display text, so a recalibration cannot split the two.
+
+# Slippage Cost Rate full marks: at or below 1% modelled the parameter is
+# clean; between here and the gate it falls linearly. A fraction, not a
+# percentage-points number, matching the rate it anchors — the display text
+# scales it by 100.
+SLIPPAGE_FULL_MARKS = 0.01
+
+# Daily Green Rate ramp: nothing at or below 40%, full marks at 85%.
+GREEN_RATE_ZERO_PCT = 40.0
+GREEN_RATE_FULL_PCT = 85.0
+
+# Profit/Loss Ratio ramp: nothing at or below the gate, full marks at 3x.
+PL_RATIO_FULL = 3.0
+
+# Markets Sample ramp: nothing below the track-record floor, full marks at 200.
+MARKETS_FULL_MARKS = 200.0
+
+# Capital Efficiency ramp: linear to full marks at a 30 PnL/volume ratio.
+CAPITAL_EFFICIENCY_FULL_RATIO = 30.0
 
 # Copyability Score tier bands, calibrated against the distribution of a real
 # scored run over the cached leaderboard data. Originally ADR 0005; re-measured
@@ -149,9 +176,9 @@ SCORING_SPEC = {
             "reason": "winning pennies, losing dollars",
         },
         {
-            "name": "Markets Sample",
-            "condition": f"< {MARKETS_GATE:.0f}",
-            "reason": "a streak, not a track record",
+            "name": "Track Record Length",
+            "condition": f"< {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f} lifetime markets",
+            "reason": "a short record is a streak, not a track record; measured in lifetime markets because the daily activity series is a rolling window that cannot measure lifetime trades",
         },
         {
             "name": "Whale Avg Invest",
@@ -165,9 +192,19 @@ SCORING_SPEC = {
         },
     ],
     "parameters": [
+        # The rows are executable: `key` is the stable breakdown id, `shape`
+        # names a curve function in _SHAPE_FNS, and the anchors are the numbers
+        # the shape scores against. The zero/full display text is generated
+        # from the same anchors where a one-line rendering exists, so a
+        # recalibration moves the scored value and the docs together.
         {
             "name": "Edge-to-Friction Ratio",
+            "key": "edge_to_friction",
             "points": 24,
+            "shape": "ramp_linear",
+            "metric": "edge_to_friction",
+            "zero_at": EDGE_TO_FRICTION_BREAK_EVEN,
+            "full_at": EDGE_TO_FRICTION_FULL_MARKS,
             "zero": f"<= {EDGE_TO_FRICTION_BREAK_EVEN:.1f} (break-even)",
             "full": f">= {EDGE_TO_FRICTION_FULL_MARKS:.1f}",
             "note": "edge per dollar of friction; the cheapest disqualifying arithmetic runs first",
@@ -175,15 +212,24 @@ SCORING_SPEC = {
         },
         {
             "name": "Slippage Cost Rate",
+            "key": "slippage_cost_rate",
             "points": 17,
+            "shape": "ramp_linear_down",
+            "metric": "slip_cost_rate",
+            "full_below": SLIPPAGE_FULL_MARKS,
+            "zero_at": SLIPPAGE_COST_RATE_GATE,
             "zero": f">= {SLIPPAGE_COST_RATE_GATE * 100:.1f}%",
-            "full": "<= 1.0%",
+            "full": f"<= {SLIPPAGE_FULL_MARKS * 100:.1f}%",
             "note": "modelled, before the Friction Realism Multiplier",
             "radar": "Slippage Cost",
         },
         {
             "name": "Drawdown Depth",
+            "key": "drawdown_depth",
             "points": 13,
+            "shape": "decay_from_peak",
+            "metric": "drawdown_depth",
+            "zero_at": DRAWDOWN_DEPTH_ZERO_AT,
             "zero": f">= {DRAWDOWN_DEPTH_ZERO_AT:.2f} of peak",
             "full": "0.0",
             "note": "from the lifetime equity curve",
@@ -191,7 +237,12 @@ SCORING_SPEC = {
         },
         {
             "name": "Recent Form",
+            "key": "recent_form",
             "points": 11,
+            "shape": "recent_form",
+            "slip_ceiling": RECENT_FORM_SLIP_CEILING_PCT,
+            "window_trades": RECENT_FORM_WINDOW_TRADES,
+            "full_marks_return": RECENT_FORM_FULL_MARKS_RETURN,
             "zero": "PnL <= $0 or slip unmeasured",
             "full": f">= {RECENT_FORM_FULL_MARKS_RETURN * 100:.0f}% return over the recent-{RECENT_FORM_WINDOW_TRADES:.0f} window at 0% slip",
             "note": "return on deployed capital, judged against the friction it came through (ADR 0004)",
@@ -199,23 +250,37 @@ SCORING_SPEC = {
         },
         {
             "name": "Daily Green Rate",
+            "key": "daily_green_rate",
             "points": 9,
-            "zero": f"< 40% or fewer than {MIN_OBSERVED_DAYS:.0f} observed days",
-            "full": ">= 85%",
+            "shape": "ramp_linear",
+            "metric": "days_win_rate",
+            "zero_at": GREEN_RATE_ZERO_PCT,
+            "full_at": GREEN_RATE_FULL_PCT,
+            "min_observed_days": MIN_OBSERVED_DAYS,
+            "zero": f"<= {GREEN_RATE_ZERO_PCT:.0f}% or fewer than {MIN_OBSERVED_DAYS:.0f} observed days",
+            "full": f">= {GREEN_RATE_FULL_PCT:.0f}%",
             "note": "copy-adjusted, measured from real per-day simulated results",
             "radar": "Green Rate",
         },
         {
             "name": "Profit/Loss Ratio",
+            "key": "pl_ratio",
             "points": 9,
+            "shape": "ramp_linear",
+            "metric": "pl_ratio",
+            "zero_at": PL_RATIO_GATE,
+            "full_at": PL_RATIO_FULL,
             "zero": f"<= {PL_RATIO_GATE:.1f}",
-            "full": ">= 3.0",
+            "full": f">= {PL_RATIO_FULL:.1f}",
             "note": "",
             "radar": "P/L Ratio",
         },
         {
             "name": "Sizing Fit",
+            "key": "sizing_fit",
             "points": 6,
+            "shape": "triangle",
+            "metric": "avg_invest",
             "zero": "outside the Copyable Trade Window",
             "full": "at the window midpoint",
             "note": "peak derived from the Copy Execution Profile, never hand-picked",
@@ -223,7 +288,11 @@ SCORING_SPEC = {
         },
         {
             "name": "Hedged Control",
+            "key": "hedged_control",
             "points": 6,
+            "shape": "decay_from_peak",
+            "metric": "hedged_pct",
+            "zero_at": HEDGED_RATE_GATE_PCT,
             "zero": f">= {HEDGED_RATE_GATE_PCT:.1f}%",
             "full": "0%",
             "note": "",
@@ -231,17 +300,26 @@ SCORING_SPEC = {
         },
         {
             "name": "Markets Sample",
+            "key": "markets_sample",
             "points": 3,
-            "zero": f"< {MARKETS_GATE:.0f}",
-            "full": ">= 200",
+            "shape": "ramp_linear",
+            "metric": "markets",
+            "zero_at": TRACK_RECORD_LENGTH_MIN_MARKETS,
+            "full_at": MARKETS_FULL_MARKS,
+            "zero": f"<= {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f}",
+            "full": f">= {MARKETS_FULL_MARKS:.0f}",
             "note": "",
             "radar": "Markets",
         },
         {
             "name": "Capital Efficiency",
+            "key": "capital_efficiency",
             "points": 2,
+            "shape": "clamp_ramp",
+            "metric": "pnl_vol_ratio",
+            "full_at": CAPITAL_EFFICIENCY_FULL_RATIO,
             "zero": "0",
-            "full": ">= 30 PnL/volume ratio",
+            "full": f">= {CAPITAL_EFFICIENCY_FULL_RATIO:.0f} PnL/volume ratio",
             "note": "",
             "radar": "Efficiency",
         },
@@ -261,6 +339,119 @@ SCORING_SPEC = {
         {"label": "F-Tier / REJECT", "min": None},
     ],
 }
+
+
+# ---------------------------------------------------------------------------
+# Parameter shapes: the small registry of curve functions the engine evaluates
+# SCORING_SPEC's parameters through. Each shape is a pure function
+# (row, ctx) -> points: the row carries its weight and anchors, the shape only
+# knows how to walk the curve. Generic shapes pull their metric from ctx by the
+# row's `metric` key; composite shapes (recent_form) read what they need
+# directly. A new parameter is a row; a new curve is a shape.
+# ---------------------------------------------------------------------------
+
+def _row_value(row, ctx):
+    """The metric a row scores, or None when it must score nothing.
+
+    Absent-stays-absent (ADR 0007): a metric that was never measured scores
+    nothing, never zero points by default. A row with a min_observed_days
+    precondition treats a streak of too few days the same way — a rate drawn
+    from a streak is not a rate.
+    """
+    value = ctx.get(row["metric"])
+    if value is None:
+        return None
+    if "min_observed_days" in row:
+        if int(ctx.get("observed_days") or 0) < row["min_observed_days"]:
+            return None
+    return value
+
+
+def _shape_ramp_linear(row, ctx):
+    """Nothing at or below zero_at, full marks at or above full_at, linear rise."""
+    value = _row_value(row, ctx)
+    if value is None or value <= row["zero_at"]:
+        return 0.0
+    if value >= row["full_at"]:
+        return row["points"]
+    span = row["full_at"] - row["zero_at"]
+    return row["points"] * ((value - row["zero_at"]) / span)
+
+
+def _shape_ramp_linear_down(row, ctx):
+    """Full marks at or below full_below, nothing at or above zero_at, linear fall."""
+    value = _row_value(row, ctx)
+    if value is None:
+        return 0.0
+    if value <= row["full_below"]:
+        return row["points"]
+    if value >= row["zero_at"]:
+        return 0.0
+    span = row["zero_at"] - row["full_below"]
+    return row["points"] * (1.0 - ((value - row["full_below"]) / span))
+
+
+def _shape_decay_from_peak(row, ctx):
+    """Full marks at zero, nothing at or beyond zero_at, linear falloff."""
+    value = _row_value(row, ctx)
+    if value is None:
+        return 0.0
+    return row["points"] * max(0.0, 1.0 - min(1.0, value / row["zero_at"]))
+
+
+def _shape_clamp_ramp(row, ctx):
+    """Linear rise to full marks at full_at, clamped flat beyond it and below zero."""
+    value = _row_value(row, ctx)
+    if value is None:
+        return 0.0
+    clamped = min(max(value, 0.0), row["full_at"])
+    return row["points"] * (clamped / row["full_at"])
+
+
+def _shape_triangle(row, ctx):
+    """Nothing outside the Copyable Trade Window, full marks at the profile's
+    sizing peak, linear on both sides of the peak."""
+    value = _row_value(row, ctx)
+    low = ctx["profile"].window_min_usd
+    high = ctx["profile"].window_max_usd
+    peak = ctx["profile"].sizing_fit_peak_usd
+    if value is None or value <= low or value >= high:
+        return 0.0
+    if value <= peak:
+        return row["points"] * ((value - low) / (peak - low))
+    return row["points"] * ((high - value) / (high - peak))
+
+
+def _shape_recent_form(row, ctx):
+    """Recent profit judged against the friction it came through (ADR 0004):
+    the product of a slip factor and a return-on-deployed-capital factor.
+    Nothing when the run is flat, the slip is unmeasured, or the target size
+    is unknown — all three read as 'no edge to measure'."""
+    r20_pnl = ctx.get("r20_pnl") or 0.0
+    r20_slip = ctx.get("r20_slip")
+    avg_inv = ctx.get("avg_invest") or 0.0
+    if r20_pnl <= 0 or r20_slip is None or avg_inv <= 0:
+        return 0.0
+    slip_ceiling = row["slip_ceiling"]
+    slip_factor = 1.0 - (min(max(r20_slip, 0.0), slip_ceiling) / slip_ceiling)
+    recent_return = r20_pnl / (row["window_trades"] * avg_inv)
+    return_factor = min(recent_return / row["full_marks_return"], 1.0)
+    return row["points"] * slip_factor * return_factor
+
+
+_SHAPE_FNS = {
+    "ramp_linear": _shape_ramp_linear,
+    "ramp_linear_down": _shape_ramp_linear_down,
+    "decay_from_peak": _shape_decay_from_peak,
+    "clamp_ramp": _shape_clamp_ramp,
+    "triangle": _shape_triangle,
+    "recent_form": _shape_recent_form,
+}
+
+
+def _score_parameter(row, ctx):
+    """Score one SCORING_SPEC parameter row: points from its shape and anchors."""
+    return _SHAPE_FNS[row["shape"]](row, ctx)
 
 
 def _hard_rejection_gates_doc() -> str:
@@ -317,7 +508,9 @@ def calculate_edge_retention(pnl_10_pct: float, pnl_2_pct: float) -> float | Non
 def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRENT_PROFILE):
     """
     PolyCop Reweighted 100-Point Triage Engine, run under one Copy Execution Profile.
-    Reallocated 10 continuous parameters (Total 100 pts).
+    Reallocated 10 continuous parameters (Total 100 pts). Each parameter's weight,
+    shape and anchors live in SCORING_SPEC; the engine only walks the declared
+    curve, so a reweight is a one-row edit and the generated docs move with it.
 
     Copyable Window Share is deliberately absent: it is simulation-only (ADR 0006),
     because no leaderboard field can proxy a distributional share of entry signals.
@@ -373,148 +566,55 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         rejection_reasons.append(f"Hedged Rate {hedged}% > {HEDGED_RATE_GATE_PCT}%")
     if pl_ratio < PL_RATIO_GATE:
         rejection_reasons.append(f"P/L Ratio {pl_ratio:.2f}x < {PL_RATIO_GATE:.1f}x")
-    if mkts < MARKETS_GATE:
-        rejection_reasons.append(f"Short Track Record ({int(mkts)} markets < {MARKETS_GATE:.0f} min threshold)")
+    if mkts < TRACK_RECORD_LENGTH_MIN_MARKETS:
+        rejection_reasons.append(f"Track Record Length ({int(mkts)} lifetime markets < {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f})")
     if avg_inv > WHALE_AVG_INVEST_LIMIT_USD:
         rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > ${WHALE_AVG_INVEST_LIMIT_USD:.0f})")
     if r20_pnl < 0 and actual_pnl > DIVERGENCE_LIFETIME_PNL_USD:
         rejection_reasons.append(f"Divergence Gate: Negative Recent Form (${r20_pnl:.2f}) vs strongly positive lifetime PnL (${actual_pnl:.2f})")
 
     # --- 10 REWEIGHTED CONTINUOUS PARAMETERS (TOTAL 100 PTS) ---
-
-    # 1. Edge-to-Friction Ratio (24 pts) - nothing at break-even, full marks at 3x
-    if edge_to_friction is None or edge_to_friction <= EDGE_TO_FRICTION_BREAK_EVEN:
-        etf_score = 0.0
-    elif edge_to_friction >= EDGE_TO_FRICTION_FULL_MARKS:
-        etf_score = 24.0
-    else:
-        span = EDGE_TO_FRICTION_FULL_MARKS - EDGE_TO_FRICTION_BREAK_EVEN
-        etf_score = 24.0 * ((edge_to_friction - EDGE_TO_FRICTION_BREAK_EVEN) / span)
-    score += etf_score
-    breakdown["edge_to_friction"] = round(etf_score, 2)
-
-    # 2. Slippage Cost Rate (17 pts)
-    if slip_cost_rate <= 0.01:
-        slip_score = 17.0
-    elif slip_cost_rate >= SLIPPAGE_COST_RATE_GATE:
-        slip_score = 0.0
-    else:
-        slip_score = 17.0 * (1.0 - ((slip_cost_rate - 0.01) / (SLIPPAGE_COST_RATE_GATE - 0.01)))
-    score += slip_score
-    breakdown["slippage_cost_rate"] = round(slip_score, 2)
-
-    # 3. Drawdown Depth (13 pts)
-    if drawdown_depth is None:
-        dd_score = 0.0
-    else:
-        dd_score = max(0.0, 13.0 * (1.0 - min(1.0, drawdown_depth / DRAWDOWN_DEPTH_ZERO_AT)))
-    score += dd_score
-    breakdown["drawdown_depth"] = round(dd_score, 2)
-
-    # 4. Recent Form (11 pts) - recent return judged against the friction it came through
-    if r20_pnl <= 0 or r20_slip is None or avg_inv <= 0:
-        rf_score = 0.0
-    else:
-        slip_factor = 1.0 - (min(max(r20_slip, 0.0), RECENT_FORM_SLIP_CEILING_PCT)
-                             / RECENT_FORM_SLIP_CEILING_PCT)
-        recent_return = r20_pnl / (RECENT_FORM_WINDOW_TRADES * avg_inv)
-        return_factor = min(recent_return / RECENT_FORM_FULL_MARKS_RETURN, 1.0)
-        rf_score = 11.0 * slip_factor * return_factor
-    score += rf_score
-    breakdown["recent_form"] = round(rf_score, 2)
-
-    # 5. Daily Green Rate (9 pts) - a rate drawn from too few days is a streak
-    if daily_green_rate is None or observed_days < MIN_OBSERVED_DAYS or daily_green_rate <= 40.0:
-        days_score = 0.0
-    elif daily_green_rate >= 85.0:
-        days_score = 9.0
-    else:
-        days_score = 9.0 * ((daily_green_rate - 40.0) / (85.0 - 40.0))
-    score += days_score
-    breakdown["daily_green_rate"] = round(days_score, 2)
-
-    # 6. Profit/Loss Ratio (9 pts)
-    if pl_ratio <= PL_RATIO_GATE:
-        pl_score = 0.0
-    elif pl_ratio >= 3.0:
-        pl_score = 9.0
-    else:
-        pl_score = 9.0 * ((pl_ratio - PL_RATIO_GATE) / (3.0 - PL_RATIO_GATE))
-    score += pl_score
-    breakdown["pl_ratio"] = round(pl_score, 2)
-
-    # 7. Sizing Fit (6 pts) - full marks at the window midpoint, nothing outside it
-    #
-    # Outside the Copyable Trade Window the realised copy ratio stops matching the
-    # nominal one: below it the venue minimum bumps the order up, above it the
-    # position cap clips it down. Neither is a mirror of the target, so neither
-    # earns points however close to the boundary it sits.
-    window_low = profile.window_min_usd
-    window_high = profile.window_max_usd
-    sizing_peak = profile.sizing_fit_peak_usd
-    if avg_inv <= window_low or avg_inv >= window_high:
-        inv_score = 0.0
-    elif avg_inv <= sizing_peak:
-        inv_score = 6.0 * ((avg_inv - window_low) / (sizing_peak - window_low))
-    else:
-        inv_score = 6.0 * ((window_high - avg_inv) / (window_high - sizing_peak))
-    score += inv_score
-    breakdown["sizing_fit"] = round(inv_score, 2)
-
-    # 8. Hedged Control (6 pts)
-    if hedged > HEDGED_RATE_GATE_PCT:
-        hedged_score = 0.0
-    else:
-        hedged_score = 6.0 * (1.0 - (hedged / HEDGED_RATE_GATE_PCT))
-    score += hedged_score
-    breakdown["hedged_control"] = round(hedged_score, 2)
-
-    # 9. Markets Sample (3 pts)
-    if mkts < MARKETS_GATE:
-        mkt_score = 0.0
-    elif mkts >= 200:
-        mkt_score = 3.0
-    else:
-        mkt_score = 3.0 * ((mkts - MARKETS_GATE) / (200.0 - MARKETS_GATE))
-    score += mkt_score
-    breakdown["markets_sample"] = round(mkt_score, 2)
-
-    # 10. Capital Efficiency (2 pts)
-    pv_clamped = min(max(pnl_vol, 0.0), 30.0)
-    pv_score = 2.0 * (pv_clamped / 30.0)
-    score += pv_score
-    breakdown["capital_efficiency"] = round(pv_score, 2)
+    # Evaluated from SCORING_SPEC: each row declares its weight, shape and
+    # anchors, and a small registry of pure curve functions scores it. A
+    # reweight is a one-row edit; the docs regenerate from the same table.
+    param_ctx = {
+        "profile": profile,
+        "edge_to_friction": edge_to_friction,
+        "slip_cost_rate": slip_cost_rate,
+        "drawdown_depth": drawdown_depth,
+        "r20_pnl": r20_pnl,
+        "r20_slip": r20_slip,
+        "avg_invest": avg_inv,
+        "days_win_rate": daily_green_rate,
+        "observed_days": observed_days,
+        "pl_ratio": pl_ratio,
+        "hedged_pct": hedged,
+        "markets": mkts,
+        "pnl_vol_ratio": pnl_vol,
+    }
+    for row in SCORING_SPEC["parameters"]:
+        pts = _score_parameter(row, param_ctx)
+        score += pts
+        breakdown[row["key"]] = round(pts, 2)
 
     # Build the display labels from the spec, once per call. The Sizing Fit
-    # label is the only one that varies per target (it embeds the profile),
-    # so it is built here rather than as a module-level constant.
+    # label is the only one that varies per target (it embeds the profile), so
+    # it is built here rather than in the spec.
+    sizing_peak = profile.sizing_fit_peak_usd
     breakdown_labels = {}
     radar_labels = {}
     breakdown_points = {}
     for i, param in enumerate(SCORING_SPEC["parameters"], start=1):
         pts = param["points"]
-        # Map parameter name to the stable breakdown key.
-        if param["name"] == "Sizing Fit":
-            bid = "sizing_fit"
+        if param["key"] == "sizing_fit":
             blbl = f"{i}. Sizing Fit (${sizing_peak:.0f} Peak) ({pts}%)"
-        elif param["name"] == "Hedged Control":
-            bid = "hedged_control"
+        elif param["key"] == "hedged_control":
             blbl = f"{i}. Hedged Control < {HEDGED_RATE_GATE_PCT:.0f}% ({pts}%)"
         else:
-            bid = {
-                "Edge-to-Friction Ratio": "edge_to_friction",
-                "Slippage Cost Rate": "slippage_cost_rate",
-                "Drawdown Depth": "drawdown_depth",
-                "Recent Form": "recent_form",
-                "Daily Green Rate": "daily_green_rate",
-                "Profit/Loss Ratio": "pl_ratio",
-                "Markets Sample": "markets_sample",
-                "Capital Efficiency": "capital_efficiency",
-            }[param["name"]]
             blbl = f"{i}. {param['name']} ({pts}%)"
-        breakdown_labels[bid] = blbl
-        radar_labels[bid] = param["radar"] + f" ({pts}%)"
-        breakdown_points[bid] = pts
+        breakdown_labels[param["key"]] = blbl
+        radar_labels[param["key"]] = param["radar"] + f" ({pts}%)"
+        breakdown_points[param["key"]] = pts
 
     final_score = round(score, 2)
 

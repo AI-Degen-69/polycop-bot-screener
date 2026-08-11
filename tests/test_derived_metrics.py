@@ -9,10 +9,7 @@ import os
 import sys
 import unittest
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
 
 from screener.derived_metrics import (
     calculate_daily_green_rate,

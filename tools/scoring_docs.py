@@ -29,15 +29,15 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-SRC_DIR = os.path.join(PROJECT_ROOT, "app", "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+# Running `python tools/scoring_docs.py` puts tools/ on sys.path; the header
+# line below makes app/src reachable so `paths` can supply the layout.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
+from paths import PROJECT_ROOT  # noqa: E402
 
 from screener.score_wallets import (  # noqa: E402
     GEM_SITE_SCORE_MAX,
-    MARKETS_GATE,
     MODELLED_COPY_PNL_MIN_USD,
+    TRACK_RECORD_LENGTH_MIN_MARKETS,
     PL_RATIO_GATE,
     SCORING_SPEC,
 )
@@ -53,7 +53,6 @@ DOCS = [
 
 CONTEXT_MD = os.path.join(PROJECT_ROOT, "CONTEXT.md")
 
-WEB_DIR = os.path.join(PROJECT_ROOT, "app", "web")
 
 
 def _tier_min(label_prefix: str) -> float:
@@ -123,8 +122,8 @@ GATE_AND_PROFILE_LABELS = [
     },
     {
         "relpath": os.path.join("app", "web", "index.html"),
-        "description": "Markets Sample gate tooltip value",
-        "expected": f"Rejects &lt; {MARKETS_GATE:.0f} (lucky streak risk)",
+        "description": "Track Record Length gate tooltip value",
+        "expected": f"Rejects &lt; {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f} (lucky streak risk)",
         "pattern": r"Rejects &lt; \d+ \(lucky streak risk\)",
     },
     {

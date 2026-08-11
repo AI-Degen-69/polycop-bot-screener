@@ -10,16 +10,13 @@ import os
 import sys
 import webbrowser
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-APP_DIR = os.path.join(SCRIPT_DIR, "app")
-SRC_DIR = os.path.join(APP_DIR, "src")
-DATA_DIR = os.path.join(APP_DIR, "data")
+# Running `python screen.py` puts the repo root on sys.path; `paths` lives
+# in app/src, so the one-line header below makes it reachable.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "src"))
+from paths import DATA_DIR, PHASE3_FILE
 # The page renders the simulation feed, so that is the file whose absence means
 # the pipeline has not run — not the triage feed it is built from.
-VERIFIED_DATA_FILE = os.path.join(DATA_DIR, "phase3_simulated_targets.json")
-
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+VERIFIED_DATA_FILE = os.path.join(DATA_DIR, PHASE3_FILE)
 
 from pipeline.orchestrator import run_pipeline
 from server.serve_web_app import start_server, PORT

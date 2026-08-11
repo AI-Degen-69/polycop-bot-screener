@@ -3,9 +3,7 @@ import sys
 
 import pytest
 
-SCRIPT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "app", "src"))
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
 
 from pipeline.run_mock_client import build_run_mock_payload  # noqa: E402
 from screener.simulated_copy_run import (  # noqa: E402
@@ -26,6 +24,47 @@ def test_build_run_mock_payload_defaults():
     assert payload["capital"] == 100
     assert payload["target_max_price"] == 0.95
     assert payload["target_min_price"] == 0.05
+
+def test_the_payload_window_fields_come_from_the_profile():
+    """The simulation endpoint must test the same execution settings the score
+    was computed under — the window and cap fields were literals here and
+    could drift from the profile (the whole point of the cap sweep)."""
+    payload = build_run_mock_payload("0xdead")
+    assert payload["target_min_usd"] == 33
+    assert payload["target_max_usd"] == 167
+    assert payload["sim_max_per_token"] == 5
+    assert payload["sim_max_global"] == 100
+    assert payload["target_min_price"] == 0.05
+    assert payload["target_max_price"] == 0.95
+
+
+def test_a_widened_cap_reaches_the_payload():
+    from execution.copy_execution_profile import CopyExecutionProfile
+
+    widened = CopyExecutionProfile().with_position_cap(20.0)
+    payload = build_run_mock_payload("0xdead", profile=widened)
+    assert payload["sim_max_per_token"] == 20
+    assert payload["target_max_usd"] == 667
+
+
+def test_fetch_forwards_the_profile_into_the_payload():
+    """The cap sweep is only real if the widened cap actually reaches the
+    endpoint — this pins the whole forwarding chain."""
+    from execution.copy_execution_profile import CopyExecutionProfile
+    from pipeline.run_mock_client import fetch_simulated_copy_run
+
+    widened = CopyExecutionProfile().with_position_cap(15.0)
+    seen = {}
+
+    def capture(payload):
+        seen.update(payload)
+        return {"sim_total_pnl": 50.0, "target_total_pnl": 100.0, "logs": []}
+
+    fetch_simulated_copy_run("0xdead", profile=widened, fetcher=capture)
+    assert seen["sim_max_per_token"] == 15
+    assert seen["target_max_usd"] == 500
+    assert seen["copy_pct"] == 3.0
+
 
 def test_parse_run_mock_response_summary():
     mock_data = {

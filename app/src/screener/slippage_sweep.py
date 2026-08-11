@@ -2,18 +2,24 @@ import os
 import sys
 from typing import Dict, Any, List, Optional
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# SCRIPT_DIR is app/src/screener -> SRC_DIR is app/src
-SRC_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
-
 from execution.copy_execution_profile import CURRENT_PROFILE
 from pipeline.run_mock_client import fetch_simulated_copy_run
 from screener.score_wallets import calculate_edge_retention
 
 
 DEFAULT_SLIPPAGE_LEVELS = [2.0, 5.0, 10.0, 15.0]
+
+# The per-position caps a wallet that passed screening is backtested under.
+# Each level replays the wallet with the cap that actually binds (see
+# `CopyExecutionProfile.with_position_cap`), so a wider level genuinely tests
+# a wider Copyable Trade Window.
+DEFAULT_CAP_LEVELS = [5.0, 10.0, 15.0, 20.0]
+
+# The cap sweep's per-level slippage set: the two gated levels that feed Edge
+# Retention. The verdict needs the 10% figure and the 2% baseline; the 5% and
+# 15% levels add nothing to it, and running all four per cap would triple a
+# scan's simulation load.
+CAP_SWEEP_SLIPPAGE_LEVELS = [2.0, 10.0]
 
 def run_slippage_sensitivity_sweep(
     wallet: str,
@@ -127,3 +133,63 @@ def run_slippage_sensitivity_sweep(
         "pnl_by_level": pnl_by_level,
         "sweep_results": sweep_results
     }
+
+
+def run_cap_sensitivity_sweep(
+    wallet: str,
+    profile=None,
+    cap_levels: Optional[List[float]] = None,
+    slippage_levels: Optional[List[float]] = None,
+    fetcher=None,
+    cache_dir: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Backtest a wallet that passed screening under rising per-position caps.
+
+    For every cap level the wallet is replayed with the cap that actually
+    binds (`with_position_cap` raises the bankroll-share rule along with the
+    cap), so the Copyable Trade Window widens for real. Each level runs the
+    two gated slippage levels and inherits the full rejection semantics of
+    `run_slippage_sensitivity_sweep` — a failed fetch stays an endpoint
+    failure, a measured non-positive PnL stays a measured rejection (ADR
+    0007).
+
+    The derived profiles carry their own fingerprints, so each cap level
+    misses cache on its own rather than serving the $5 result for every level.
+    """
+    if profile is None:
+        profile = CURRENT_PROFILE
+    if cap_levels is None:
+        cap_levels = DEFAULT_CAP_LEVELS
+    if slippage_levels is None:
+        slippage_levels = CAP_SWEEP_SLIPPAGE_LEVELS
+
+    results = []
+    for cap in cap_levels:
+        cap_profile = profile.with_position_cap(cap)
+        out = run_slippage_sensitivity_sweep(
+            wallet=wallet,
+            profile=cap_profile,
+            slippage_levels=slippage_levels,
+            fetcher=fetcher,
+            cache_dir=cache_dir
+        )
+        pnl_10 = out.get("pnl_by_level", {}).get(10.0)
+        results.append({
+            "cap_usd": cap,
+            "window_min_usd": round(cap_profile.window_min_usd, 2),
+            "window_max_usd": round(cap_profile.window_max_usd, 2),
+            "max_single_position_usd": round(cap_profile.max_single_position_usd, 2),
+            "copy_trade_usd": round(cap_profile.copy_trade_usd, 2),
+            "is_rejected": out.get("is_rejected"),
+            "rejection_reason": out.get("rejection_reason"),
+            "endpoint_failure": out.get("endpoint_failure"),
+            "simulated_copy_pnl_10": (
+                round(pnl_10, 2) if pnl_10 is not None else None
+            ),
+            "edge_retention": (
+                round(out["edge_retention"], 4)
+                if out["edge_retention"] is not None else None
+            ),
+        })
+    return results

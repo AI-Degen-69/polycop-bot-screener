@@ -8,10 +8,11 @@ the cutover was for. The live browser check lives in verify_web_app_live.py.
 """
 import os
 import re
+import sys
 import unittest
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-WEB_DIR = os.path.join(PROJECT_ROOT, "app", "web")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "src"))
+from paths import PROJECT_ROOT, WEB_DIR
 INDEX_HTML = os.path.join(WEB_DIR, "index.html")
 APP_JS = os.path.join(WEB_DIR, "js", "app.js")
 
@@ -41,13 +42,55 @@ class TestThePageReadsTheSimulationFeed(unittest.TestCase):
         self.app_js = _read(APP_JS)
 
     def test_it_fetches_the_simulation_output(self):
-        self.assertIn("phase3_simulated_targets.json", self.app_js)
+        # The page reads the server's compact v1 projection, not the raw scan
+        # file: the raw file is ~6 MB and 92% of it is a skip log the page
+        # shows 12 rows of.
+        self.assertIn("/api/feed/v1", self.app_js)
+        self.assertNotIn("phase3_simulated_targets.json", self.app_js)
 
     def test_it_no_longer_fetches_the_triage_output(self):
         self.assertNotIn("phase2_verified_targets.json", self.app_js)
 
     def test_it_reads_the_simulated_targets_collection(self):
         self.assertIn("simulated_targets", self.app_js)
+
+    def test_every_whitelisted_field_appears_in_the_shipped_script(self):
+        # The server's projection whitelist is the page's contract: a field
+        # rendered here but missing there arrives as undefined in production
+        # with green tests. Every whitelisted wallet field must be referenced
+        # somewhere in the shipped script (as a dot-access or a render key),
+        # so a field the page stopped reading fails loudly on the server side.
+        sys.path.insert(0, os.path.join(PROJECT_ROOT, "app", "src"))
+        from server.feed_projection import WALLET_FIELDS
+        for field in WALLET_FIELDS:
+            with self.subTest(field=field):
+                # A plain name match: the page reads fields by dot-access or by
+                # single/double-quoted render keys, and a name in a comment is
+                # a harmless false positive for a drift guard.
+                self.assertIn(field, self.app_js, f"{field} is whitelisted but never read")
+
+    def test_every_field_the_page_reads_is_carried_by_the_projection(self):
+        # The reverse drift guard: a field the page renders must be carried by
+        # the projection, or it arrives undefined in production. The explicit
+        # known-reader list is the page's full surface (dot-access fields plus
+        # the string keys passed to renderVerdictMetricCell).
+        sys.path.insert(0, os.path.join(PROJECT_ROOT, "app", "src"))
+        from server.feed_projection import WALLET_FIELDS, CAPPED_LISTS
+        capped = {key for key, _ in CAPPED_LISTS}
+        page_reads = {
+            "address", "name", "triage_copyability_score", "triage_grade",
+            "metrics", "verdict_source", "tier", "edge_retention",
+            "simulated_copy_pnl_10", "simulated_daily_green_rate",
+            "simulated_max_drawdown", "copyable_window_share", "scan_rank",
+            "activity", "is_hidden_gem", "bankroll_analysis",
+            "cap_sweep", "breakdown", "breakdown_labels", "breakdown_points",
+            "radar_labels", "skip_reasons", "balance_miss_details",
+        }
+        missing = page_reads - set(WALLET_FIELDS) - capped
+        self.assertEqual(
+            missing, set(),
+            f"the projection drops fields the page renders: {sorted(missing)}",
+        )
 
     def test_the_scan_path_rereads_the_feed_rather_than_parsing_the_response(self):
         """A finished scan must fill the grid, not empty it.

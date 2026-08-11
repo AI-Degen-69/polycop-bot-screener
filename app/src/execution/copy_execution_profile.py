@@ -7,6 +7,7 @@ being copied into whichever module happens to need it.
 """
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, replace
 
 
@@ -133,6 +134,35 @@ class CopyExecutionProfile:
     def with_bankroll(self, bankroll_usd: float) -> "CopyExecutionProfile":
         """The same settings sized to a different bankroll."""
         return replace(self, bankroll_usd=float(bankroll_usd))
+
+    def with_position_cap(self, cap_usd: float) -> "CopyExecutionProfile":
+        """The same settings with a different per-position cap, sized so the
+        stated cap is the one that binds.
+
+        `max_single_position_usd` is the smallest of the bankroll-share rule,
+        the per-token cap and the global cap — so raising only the per-token
+        cap changes nothing while the bankroll share binds lower (on a $100
+        bankroll, the 5% rule caps a position at $5 however high the per-token
+        cap is set). The share is therefore raised to `cap / bankroll` so the
+        requested cap is effective, which is exactly what a per-position cap
+        sweep is testing. The global cap is left untouched, so a level above
+        it is clipped by the global cap rather than the stated one.
+        """
+        cap = float(cap_usd)
+        if cap <= 0 or not math.isfinite(cap):
+            raise ValueError(f"per-position cap must be positive and finite, got {cap_usd}")
+        if self.bankroll_usd <= 0:
+            # No share of a non-positive bankroll can make the requested cap
+            # bind: `max_single_position_usd` stays at the bankroll share,
+            # which is zero or negative however high the per-token cap is set.
+            # The derived profile would then be labelled with a cap it never
+            # applied, so the request is refused rather than answered with a
+            # sweep level that was not tested.
+            raise ValueError(
+                f"bankroll_usd must be positive to derive a cap profile, got {self.bankroll_usd}"
+            )
+        share = max(self.max_position_bankroll_fraction, cap / self.bankroll_usd)
+        return replace(self, per_token_cap_usd=cap, max_position_bankroll_fraction=share)
 
 
 # The profile this screen currently runs under. Changing it invalidates every

@@ -7,7 +7,9 @@ This repo is **single-context**: one `CONTEXT.md` and one `docs/adr/` at the rep
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in.
+- **`docs/adr/`** — read ADRs that touch the area you're about to work in. If the work touches
+  the feed the page reads, start with ADR 0011: the page reads a compact versioned projection
+  (`/api/feed/v1`), never the raw scan file.
 - **`.agents/AGENTS.md`** — the PolyCop 100-point audit standard and response-formatting rules. Treat its scoring thresholds as domain vocabulary.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.
@@ -19,7 +21,8 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 ├── CONTEXT.md
 ├── docs/adr/
 │   ├── 0001-....md
-│   └── 0002-....md
+│   ├── 0002-....md
+│   └── 0011-page-reads-compact-versioned-feed-projection.md
 ├── app/
 ├── tools/
 └── tests/
