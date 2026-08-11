@@ -18,6 +18,16 @@ from screener.score_wallets import (
 )
 from screener.activity import compute_activity, parse_timestamp, summarize_buckets
 
+def _round_or_none(value, digits=2):
+    """A figure rounded for the record, or None when it was never measured.
+
+    `round(None, 2)` raises, so the record writer needs the same
+    absent-stays-absent discipline the engine uses (ADR 0007): a figure the
+    source could not measure is published as null, not as a rounded zero.
+    """
+    return None if value is None else round(value, digits)
+
+
 def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
     """
     Phase 2: Takes raw scraped profiles from app/data/phase1_scraped_wallets.json,
@@ -83,7 +93,10 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         # a wallet the screen grades A-Tier or better while the site rates it
         # poorly. The old constant 80.0 is gone so the gem definition cannot
         # silently diverge from the tier floors.
-        is_gem = raw_metrics["polycop_site_score"] < GEM_SITE_SCORE_MAX and score >= TIER_A_MIN
+        site_score = raw_metrics["polycop_site_score"]
+        # An unmeasured site score cannot disagree with the screen, and Hidden Gem
+        # is defined as that disagreement.
+        is_gem = site_score is not None and site_score < GEM_SITE_SCORE_MAX and score >= TIER_A_MIN
         raw_name = p.get("name") or p.get("username")
         name_str = str(raw_name) if raw_name else f"PolyCop_Trader ({addr[:6]}...{addr[-4:]})"
 
@@ -97,21 +110,21 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
             "simulation_summary": sim_summary,
             "metrics": {
                 "polycop_site_score": raw_metrics["polycop_site_score"],
-                "actual_pnl": round(raw_metrics["actual_pnl"], 2),
-                "copy_pnl": round(raw_metrics["copy_pnl"], 2),
-                "days_win_rate": round(green_rate, 2) if green_rate is not None else None,
+                "actual_pnl": _round_or_none(raw_metrics["actual_pnl"]),
+                "copy_pnl": _round_or_none(raw_metrics["copy_pnl"]),
+                "days_win_rate": _round_or_none(green_rate),
                 "observed_days": observed_days,
-                "drawdown_depth": round(drawdown_depth, 4) if drawdown_depth is not None else None,
-                "edge_to_friction": round(edge_to_friction, 4) if edge_to_friction is not None else None,
-                "hedged_pct": round(raw_metrics["hedged_pct"], 2),
-                "r20_win_rate": round(raw_metrics["r20_win_rate"], 2),
-                "pl_ratio": round(raw_metrics["pl_ratio"], 2),
-                "pnl_vol_ratio": round(raw_metrics["pnl_vol_ratio"], 2),
-                "avg_invest": round(raw_metrics["avg_invest"], 2),
+                "drawdown_depth": _round_or_none(drawdown_depth, 4),
+                "edge_to_friction": _round_or_none(edge_to_friction, 4),
+                "hedged_pct": _round_or_none(raw_metrics["hedged_pct"]),
+                "r20_win_rate": _round_or_none(raw_metrics["r20_win_rate"]),
+                "pl_ratio": _round_or_none(raw_metrics["pl_ratio"]),
+                "pnl_vol_ratio": _round_or_none(raw_metrics["pnl_vol_ratio"]),
+                "avg_invest": _round_or_none(raw_metrics["avg_invest"]),
                 "markets": raw_metrics["markets"],
-                "r20_pnl": round(raw_metrics["r20_pnl"], 2),
-                "r20_slip": round(raw_metrics["r20_slip"], 2) if raw_metrics["r20_slip"] is not None else None,
-                "buy_price": round(raw_metrics["buy_price"], 4)
+                "r20_pnl": _round_or_none(raw_metrics["r20_pnl"]),
+                "r20_slip": _round_or_none(raw_metrics["r20_slip"]),
+                "buy_price": _round_or_none(raw_metrics["buy_price"], 4)
             },
             "activity": compute_activity(p, now=scrape_now),
             "breakdown": audit_res["breakdown"],

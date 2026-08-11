@@ -477,6 +477,22 @@ def _measured(value):
         return None
 
 
+def _figure(metrics, key, default):
+    """A figure the source measured, or the default when it never sent the key.
+
+    The companion to `_measured` for inputs that carry a default. A key the
+    source omitted takes that default, which is the behaviour the leaderboard
+    has always relied on. A key the source sent holding None is a measurement
+    it could not make, and it stays None so the gates can refuse it and the
+    parameter rows can score it as nothing (ADR 0007). Coercing it with a bare
+    `float()` raises instead, which is what a source measuring each figure
+    independently would hit on its first truncated wallet.
+    """
+    if key not in metrics:
+        return default
+    return _measured(metrics[key])
+
+
 def grade_for_score(final_score: float) -> str:
     """The triage grade a Copyability Score earns under the recalibrated bands.
 
@@ -529,18 +545,18 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     breakdown = {}
     rejection_reasons = []
 
-    actual_pnl = float(metrics.get("actual_pnl", metrics.get("copy_pnl", 0.0)))
-    copy_pnl = float(metrics.get("copy_pnl", -1.0))
-    hedged = float(metrics.get("hedged_pct", 100.0))
-    pl_ratio = float(metrics.get("pl_ratio", 0.0))
-    r20_pnl = float(metrics.get("r20_pnl", 0.0))
+    actual_pnl = _figure(metrics, "actual_pnl", _figure(metrics, "copy_pnl", 0.0))
+    copy_pnl = _figure(metrics, "copy_pnl", -1.0)
+    hedged = _figure(metrics, "hedged_pct", 100.0)
+    pl_ratio = _figure(metrics, "pl_ratio", 0.0)
+    r20_pnl = _figure(metrics, "r20_pnl", 0.0)
     # Unmeasured slip is not frictionless slip. A missing value here used to
     # arrive as zero from the pipeline, which is the best possible reading.
     r20_slip = _measured(metrics.get("r20_slip"))
-    pnl_vol = float(metrics.get("pnl_vol_ratio", 0.0))
-    mkts = float(metrics.get("markets", 0))
-    avg_inv = float(metrics.get("avg_invest", 0.0))
-    polycop_site_score = float(metrics.get("polycop_site_score", 0.0))
+    pnl_vol = _figure(metrics, "pnl_vol_ratio", 0.0)
+    mkts = _figure(metrics, "markets", 0)
+    avg_inv = _figure(metrics, "avg_invest", 0.0)
+    polycop_site_score = _figure(metrics, "polycop_site_score", 0.0)
     # These three are measured rather than read off the leaderboard, and any of
     # them can be unavailable. None means unmeasured and scores nothing: a
     # default would hand out points the wallet never earned, which is exactly
@@ -550,27 +566,49 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     daily_green_rate = _measured(metrics.get("days_win_rate"))
     observed_days = int(metrics.get("observed_days") or 0)
 
-    if abs(actual_pnl) > 0:
+    # Both halves must be measured for the ratio to mean anything. Deriving it
+    # from an unmeasured half would manufacture a friction reading, and this
+    # figure both gates and carries 17 points.
+    if actual_pnl is None or copy_pnl is None:
+        slip_cost_rate = None
+    elif abs(actual_pnl) > 0:
         slip_cost_rate = max(0.0, (actual_pnl - copy_pnl) / abs(actual_pnl))
     else:
         slip_cost_rate = 0.0
 
     # --- HARD REJECTION GATES ---
-    if polycop_site_score < SITE_SCORE_SANITY_FLOOR:
+    # A gate whose input was never measured rejects on the absence and says so.
+    # Comparing None raises, and substituting a default would state a
+    # measurement nobody took - the failure ADR 0007 exists to prevent, in the
+    # one place where it decides a wallet's fate outright.
+    for figure, gate_name in (
+        (polycop_site_score, "PolyCop Site Score"),
+        (copy_pnl, "Modelled Copy PnL"),
+        (slip_cost_rate, "Slippage Cost Rate"),
+        (hedged, "Hedged Rate"),
+        (pl_ratio, "P/L Ratio"),
+        (mkts, "Track Record Length"),
+        (avg_inv, "Whale Avg Invest"),
+    ):
+        if figure is None:
+            rejection_reasons.append(f"{gate_name} unmeasured (gate cannot be evaluated)")
+
+    if polycop_site_score is not None and polycop_site_score < SITE_SCORE_SANITY_FLOOR:
         rejection_reasons.append(f"PolyCop Site Score {polycop_site_score:.0f} < {SITE_SCORE_SANITY_FLOOR:.0f}/100 sanity floor")
-    if copy_pnl < MODELLED_COPY_PNL_MIN_USD:
+    if copy_pnl is not None and copy_pnl < MODELLED_COPY_PNL_MIN_USD:
         rejection_reasons.append("Modelled Copy PnL < $0 (Toxic Copy Poison)")
-    if slip_cost_rate > SLIPPAGE_COST_RATE_GATE:
+    if slip_cost_rate is not None and slip_cost_rate > SLIPPAGE_COST_RATE_GATE:
         rejection_reasons.append(f"Slippage Cost Rate {slip_cost_rate*100:.1f}% > {SLIPPAGE_COST_RATE_GATE*100:.1f}% modelled limit")
-    if hedged > HEDGED_RATE_GATE_PCT:
+    if hedged is not None and hedged > HEDGED_RATE_GATE_PCT:
         rejection_reasons.append(f"Hedged Rate {hedged}% > {HEDGED_RATE_GATE_PCT}%")
-    if pl_ratio < PL_RATIO_GATE:
+    if pl_ratio is not None and pl_ratio < PL_RATIO_GATE:
         rejection_reasons.append(f"P/L Ratio {pl_ratio:.2f}x < {PL_RATIO_GATE:.1f}x")
-    if mkts < TRACK_RECORD_LENGTH_MIN_MARKETS:
+    if mkts is not None and mkts < TRACK_RECORD_LENGTH_MIN_MARKETS:
         rejection_reasons.append(f"Track Record Length ({int(mkts)} lifetime markets < {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f})")
-    if avg_inv > WHALE_AVG_INVEST_LIMIT_USD:
+    if avg_inv is not None and avg_inv > WHALE_AVG_INVEST_LIMIT_USD:
         rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > ${WHALE_AVG_INVEST_LIMIT_USD:.0f})")
-    if r20_pnl < 0 and actual_pnl > DIVERGENCE_LIFETIME_PNL_USD:
+    if (r20_pnl is not None and actual_pnl is not None
+            and r20_pnl < 0 and actual_pnl > DIVERGENCE_LIFETIME_PNL_USD):
         rejection_reasons.append(f"Divergence Gate: Negative Recent Form (${r20_pnl:.2f}) vs strongly positive lifetime PnL (${actual_pnl:.2f})")
 
     # --- 10 REWEIGHTED CONTINUOUS PARAMETERS (TOTAL 100 PTS) ---
@@ -626,10 +664,17 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     # Bankroll Sizing Controls & Caps, all stated by the Copy Execution Profile
     max_single_position_usd = profile.max_single_position_usd
     actual_copy_trade = profile.copy_trade_usd
-    participation_rate = round((actual_copy_trade / avg_inv) * 100.0, 2) if avg_inv > 0 else 0.0
+    # Sizing is stated against the target's typical trade, so an unmeasured
+    # one leaves these unstated rather than describing a mirror of nothing.
+    participation_rate = (
+        round((actual_copy_trade / avg_inv) * 100.0, 2)
+        if avg_inv is not None and avg_inv > 0 else 0.0
+    )
 
     # Smallest target order whose mirrored share still clears the venue minimum
-    min_target_order_for_1usd = profile.min_target_order_floor_usd(avg_inv)
+    min_target_order_for_1usd = (
+        profile.min_target_order_floor_usd(avg_inv) if avg_inv is not None else None
+    )
 
     return {
         "final_score": final_score,
@@ -645,7 +690,9 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
             "user_copy_trade_usd": actual_copy_trade,
             "max_single_position_cap_usd": max_single_position_usd,
             "capital_participation_rate": f"{participation_rate}%",
-            "slippage_cost_rate": f"{slip_cost_rate*100:.2f}%",
+            "slippage_cost_rate": (
+                f"{slip_cost_rate*100:.2f}%" if slip_cost_rate is not None else None
+            ),
             "min_target_order_floor_usd": min_target_order_for_1usd
         }
     }

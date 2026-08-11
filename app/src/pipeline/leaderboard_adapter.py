@@ -40,6 +40,26 @@ def _optional_float(value) -> Optional[float]:
         return None
 
 
+def _figure(profile: Dict[str, Any], keys, default):
+    """A figure the source supplied, or its default when the source omitted it.
+
+    Absence and unmeasurability are different states, and this keeps them
+    apart. A key the source never sent takes the default, which is what the
+    leaderboard has always relied on. A key the source sent holding None is a
+    measurement that could not be made, and it stays None all the way to the
+    engine rather than being coerced - `float(None)` raises, and a source that
+    measures each figure independently, rather than filling every field the way
+    the leaderboard does, sends exactly that shape.
+
+    The first key present wins, so an explicit null is never silently replaced
+    by a fallback field's value.
+    """
+    for key in keys:
+        if key in profile:
+            return _optional_float(profile[key])
+    return default
+
+
 def to_engine_metrics(profile: Dict[str, Any], slippage_pct: float) -> Dict[str, Any]:
     """Measure a raw leaderboard profile into the engine's metric shape.
 
@@ -62,22 +82,22 @@ def to_engine_metrics(profile: Dict[str, Any], slippage_pct: float) -> Dict[str,
     edge_to_friction = calculate_edge_to_friction(pnl_vol_ratio, slippage_pct)
 
     raw_metrics = {
-        "actual_pnl": float(profile.get("actual_pnl", profile.get("pnl", 0.0))),
-        "copy_pnl": float(profile.get("copy_backtest_pnl", profile.get("copy_pnl", -1.0))),
-        "hedged_pct": float(profile.get("hedged_pct", profile.get("hedged_percentage", 0.0))),
-        "pl_ratio": float(profile.get("avg_profit_loss_ratio", profile.get("pl_ratio", 0.0))),
+        "actual_pnl": _figure(profile, ("actual_pnl", "pnl"), 0.0),
+        "copy_pnl": _figure(profile, ("copy_backtest_pnl", "copy_pnl"), -1.0),
+        "hedged_pct": _figure(profile, ("hedged_pct", "hedged_percentage"), 0.0),
+        "pl_ratio": _figure(profile, ("avg_profit_loss_ratio", "pl_ratio"), 0.0),
         "days_win_rate": green_rate,
         "observed_days": observed_days,
-        "r20_win_rate": float(profile.get("r20_wr", profile.get("recent_20_win_rate", profile.get("r20_win_rate", 0.0)))),
-        "r20_pnl": float(profile.get("r20_pnl", profile.get("recent_20_pnl", 0.0))),
+        "r20_win_rate": _figure(profile, ("r20_wr", "recent_20_win_rate", "r20_win_rate"), 0.0),
+        "r20_pnl": _figure(profile, ("r20_pnl", "recent_20_pnl"), 0.0),
         "r20_slip": _optional_float(profile.get("r20_slip", profile.get("recent_20_slippage"))),
         # Capital Efficiency reads this directly and an unknown ratio earns
         # nothing there, which zero already expresses.
         "pnl_vol_ratio": pnl_vol_ratio if pnl_vol_ratio is not None else 0.0,
-        "avg_invest": float(profile.get("avg_invest", 0.0)),
-        "markets": int(profile.get("markets_traded", profile.get("markets", 0))),
-        "polycop_site_score": float(profile.get("polycop_site_score", profile.get("score", 0.0))),
-        "buy_price": float(profile.get("buy_price", profile.get("avg_buy_price", 0.0))),
+        "avg_invest": _figure(profile, ("avg_invest",), 0.0),
+        "markets": _figure(profile, ("markets_traded", "markets"), 0),
+        "polycop_site_score": _figure(profile, ("polycop_site_score", "score"), 0.0),
+        "buy_price": _figure(profile, ("buy_price", "avg_buy_price"), 0.0),
         "drawdown_depth": drawdown_depth,
         "edge_to_friction": edge_to_friction,
     }

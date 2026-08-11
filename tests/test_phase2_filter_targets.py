@@ -241,5 +241,77 @@ class TestTheScaleIsNotInflated(unittest.TestCase):
         self.assertAlmostEqual(target["final_score"], 10.63, places=1)
 
 
+class TestAnUnmeasuredFigureDoesNotAbortThePhase(unittest.TestCase):
+    """A present-but-null figure must score as unmeasured, not crash the run.
+
+    ADR 0007 requires a figure the source could not supply to stay absent
+    rather than arrive as a measured zero. The ratio fields above are covered,
+    because they read through `_optional_float`. Every other figure is coerced
+    with a bare `float(profile.get(key, fallback))`, and a key that is *present*
+    holding `None` never reaches that fallback - it reaches `float(None)` and
+    raises.
+
+    Nothing has exercised this because the leaderboard source fills every field
+    in. A first-party source measures each figure independently and leaves
+    absent whatever its window could not cover, so it emits exactly the shape
+    these assert on: one null figure among valid ones.
+    """
+
+    # Every figure read with a bare float(), in the adapter or in
+    # calculate_bankroll_optimized_score.
+    NULLABLE_SOURCE_FIELDS = (
+        "actual_pnl",
+        "copy_backtest_pnl",
+        "hedged_pct",
+        "avg_profit_loss_ratio",
+        "r20_pnl",
+        "avg_invest",
+        "markets_traded",
+        "polycop_site_score",
+    )
+
+    def test_a_null_figure_in_any_field_does_not_raise(self):
+        """Every wallet reaches a verdict - passed or rejected, never a crash."""
+        for field in self.NULLABLE_SOURCE_FIELDS:
+            with self.subTest(field=field):
+                profile = _profile("0x" + field[:8], **{field: None})
+                try:
+                    scan = _run([profile])
+                except TypeError as exc:
+                    self.fail(
+                        f"a null {field} aborted the phase instead of scoring "
+                        f"as unmeasured: {exc}"
+                    )
+                accounted = (len(scan["verified_targets"])
+                             + scan["rejected_disqualified_count"])
+                self.assertEqual(accounted, 1)
+
+    def test_an_unmeasured_gate_input_rejects_rather_than_passing(self):
+        """A gate cannot be cleared by a figure nobody measured.
+
+        Failing closed is the conservative reading: the alternative admits a
+        wallet precisely because the evidence that would disqualify it is the
+        evidence that is missing.
+        """
+        scan = _run([_profile("0xnullpl", avg_profit_loss_ratio=None)])
+        self.assertEqual(scan["verified_targets"], [])
+        self.assertEqual(scan["rejected_disqualified_count"], 1)
+
+    def test_an_unmeasured_scored_input_costs_its_points_not_the_wallet(self):
+        """A figure that only scores, and never gates, must not disqualify."""
+        target = _run([_profile("0xnullr20", r20_pnl=None)])["verified_targets"][0]
+        self.assertEqual(_points(target, "Recent Form"), 0.0)
+
+    def test_a_wallet_scored_on_nulls_cannot_outrank_a_fully_measured_one(self):
+        measured = _profile("0xmeasured")
+        partial = _profile("0xpartial", r20_pnl=None)
+        scan = _run([measured, partial])
+        by_address = {t["address"]: t for t in scan["verified_targets"]}
+        self.assertLess(
+            by_address["0xpartial"]["final_score"],
+            by_address["0xmeasured"]["final_score"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
