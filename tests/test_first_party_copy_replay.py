@@ -116,17 +116,32 @@ def test_a_trade_below_the_window_is_not_mirrored_at_all():
     trades it could not follow is the whole of what Slippage Cost Rate means."""
     out = _replay([_buy(usdc=5.0), _sell()])
     assert out["replayed_markets"] == 0
+    assert out["bankroll_copy_pnl"] is None
+    # The full-size mirror has no bankroll to constrain, so it still measures
+    # the trade. Asserting only the bankroll side would pass even if the mirror
+    # wrongly refused it too, which would silently break the friction gates.
+    assert out["modelled_copy_pnl"] is not None
 
 
 def test_a_trade_above_the_window_is_not_mirrored_either():
     profile = _profile()
     out = _replay([_buy(usdc=profile.window_max_usd * 10), _sell()], profile=profile)
     assert out["replayed_markets"] == 0
+    assert out["bankroll_copy_pnl"] is None
+    assert out["modelled_copy_pnl"] is not None
 
 
 def test_a_price_outside_the_profile_bounds_is_not_copied():
     out = _replay([_buy(price=0.99, usdc=50.0), _sell(price=0.995)])
     assert out["replayed_markets"] == 0
+
+
+def test_an_exit_above_the_price_ceiling_still_closes_the_position():
+    """The price bounds decide which markets the bot enters. Applied to exits
+    too, a target selling above the ceiling would leave a position the follower
+    did open to expire worthless - booking a loss it never took."""
+    entered = _replay([_buy(price=0.5, usdc=50.0), _sell(price=0.97)])
+    assert entered["bankroll_copy_pnl"] > 0
 
 
 def test_the_position_cap_clips_a_large_copy():
@@ -238,8 +253,20 @@ def test_the_window_friction_is_a_share_of_the_capital_the_copy_turned_over():
     assert 0.0 < out["recent_window_friction_pct"] < 15.0
 
 
-def test_friction_is_unmeasured_when_the_copy_turned_over_nothing():
+def test_the_window_refusing_a_trade_does_not_make_friction_unmeasured():
+    """Recent Form weighs the target's own return against the friction it came
+    through, so the friction term is measured on the mirror. Read off the
+    bankroll pass it would go absent whenever the Copyable Trade Window refused
+    the recent stretch - a statement about the window, not about friction, and
+    window share is simulation-only (ADR 0006)."""
     out = _replay([_buy(usdc=5.0)], settled=_settled(MARKET))
+    assert out["bankroll_copy_pnl"] is None
+    assert out["recent_window_friction_pct"] is not None
+
+
+def test_friction_is_unmeasured_when_the_mirror_turned_over_nothing():
+    # Priced outside the profile's bounds, so no pass enters the market at all.
+    out = _replay([_buy(price=0.99, usdc=50.0)], settled=_settled(MARKET))
     assert out["recent_window_friction_pct"] is None
 
 

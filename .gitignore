@@ -34,3 +34,6 @@ node_modules/
 .freebuff/desktop-v2.db-shm
 .freebuff/desktop-v2.db-wal
 app/data/run_mock_cache/
+
+# Scratch artifacts from side sessions. Not part of any change.
+.freebuff/

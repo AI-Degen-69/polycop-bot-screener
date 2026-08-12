@@ -201,6 +201,19 @@ ARM_LOADERS = {
 
 # ------------------------------------------------------------------- state
 
+def _ensure_parent(path):
+    """Make sure the directory a write is about to land in exists.
+
+    A first run on a clean checkout, or one pointed at a fresh directory by
+    `--log` or `--state`, would otherwise fail on the write - after the poll
+    had already spent its API calls and priced its trades, with the records
+    only in memory and no book left to re-read them from.
+    """
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
 def load_state(path=PAPER_TRADE_STATE_FILE):
     if not os.path.exists(path):
         return {}
@@ -218,6 +231,7 @@ def save_state(state, path=PAPER_TRADE_STATE_FILE):
     The poller is stopped and restarted by hand; a half-written state file would
     lose the cursors and silently re-log trades already recorded.
     """
+    _ensure_parent(path)
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2, sort_keys=True)
@@ -275,6 +289,7 @@ def append_records(records, path=PAPER_TRADE_LOG_FILE):
     """
     if not records:
         return
+    _ensure_parent(path)
     with open(path, "a", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
@@ -291,8 +306,19 @@ def poll_wallet(session, arm, wallet, cursor, portfolio, now=None):
     if not activity:
         return [], cursor
 
-    newest = int(max(float(entry.get("timestamp") or 0)
-                     for entry in activity if isinstance(entry, dict)))
+    # A non-empty page whose rows are not dicts leaves nothing to take a max
+    # over. `max()` would raise on the empty sequence, and nothing above this
+    # catches it - one malformed page would end a poller meant to run for
+    # weeks, and the log has no backfill to recover the gap with.
+    stamps = [
+        float(entry.get("timestamp") or 0)
+        for entry in activity if isinstance(entry, dict)
+    ]
+    if not stamps:
+        log.warning("%s %s returned a page with no readable rows", arm, wallet["address"])
+        return [], cursor
+
+    newest = int(max(stamps))
     if cursor is None:
         return [], newest
 

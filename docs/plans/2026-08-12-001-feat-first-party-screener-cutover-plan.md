@@ -11,6 +11,17 @@ origin: docs/adr/0012-metrics-come-from-first-party-fills.md
 
 # feat: First-party screener cutover — every judgment derives from Polymarket fills
 
+> **Superseded in two places by [ADR 0014](../adr/0014-modelled-copy-pnl-is-a-full-size-mirror.md).**
+> This plan is kept as written, because what it got wrong is part of the record.
+>
+> 1. **U2 prescribes a bankroll-scaled replay.** Run against real wallets that rejected 17 of 17 on
+>    the Slippage Cost Rate gate: against a scaled copy, `(actual − copy)/actual` measures the
+>    bankroll rather than the friction. Modelled Copy PnL is a **full-size mirror** at a fixed 2% per
+>    side. The plan's own risk section named this as U2's load-bearing assumption; it did not hold.
+> 2. **U7 requires the tier bands to be re-measured.** They were measured and deliberately **not
+>    moved**: only 3 wallets are scoreable under the current profile, which cannot calibrate an
+>    absolute floor. The re-measurement is owed once the scanner has re-run the dataset.
+
 ## Goal Capsule
 
 The 100-point audit currently scores wallets on numbers a third-party aggregator computed and

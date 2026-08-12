@@ -128,6 +128,12 @@ def _run(records, profiles=None):
             return json.load(f)
 
 
+def _engine_metrics(record):
+    from pipeline.first_party_adapter import to_engine_metrics
+
+    return to_engine_metrics(record, CURRENT_PROFILE.slippage_pct)["raw_metrics"]
+
+
 def _points(target, needle):
     # Try stable id first, then the display labels.
     b = target["breakdown"]
@@ -404,7 +410,19 @@ class TestAnUnmeasuredFigureDoesNotAbortThePhase(unittest.TestCase):
         self.assertEqual(scan["rejected_disqualified_count"], 1)
 
     def test_an_unmeasured_copy_pnl_rejects_as_unmeasured_not_as_toxic(self):
-        scan = _run([_record("0xnullcopy", copy_replay={"modelled_copy_pnl": None})])
+        """The two readings call for different work. Toxic means the modelled
+        copy lost money and the wallet is not a target; unmeasured means the
+        scan could not price it and should try again. Asserting only that it
+        was rejected would pass either way."""
+        from screener.score_wallets import calculate_bankroll_optimized_score
+
+        record = _record("0xnullcopy", copy_replay={"modelled_copy_pnl": None})
+        metrics = _engine_metrics(record)
+        reasons = calculate_bankroll_optimized_score(metrics)["rejection_reasons"]
+        self.assertTrue(any("Modelled Copy PnL unmeasured" in r for r in reasons), reasons)
+        self.assertFalse(any("Toxic Copy Poison" in r for r in reasons), reasons)
+
+        scan = _run([record])
         self.assertEqual(scan["verified_targets"], [])
         self.assertEqual(scan["rejected_disqualified_count"], 1)
 

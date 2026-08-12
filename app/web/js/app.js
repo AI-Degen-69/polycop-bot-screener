@@ -230,6 +230,13 @@ function updateSummaryHeader(data = {}) {
     document.getElementById("statGems").innerText = gemsCount;
 }
 
+function sortableMetric(t, key) {
+    // -Infinity, not 0: an unmeasured figure belongs at the bottom of a
+    // descending sort, below every wallet that was actually measured.
+    const value = t.metrics ? t.metrics[key] : null;
+    return (typeof value === "number") ? value : -Infinity;
+}
+
 function activityHours(t) {
     const h = t.activity ? t.activity.hours_since_active : null;
     return (h === null || h === undefined) ? Infinity : h;
@@ -334,8 +341,10 @@ function filterAndRender() {
         filteredTargets.sort((a, b) =>
             ((b.simulated_copy_pnl_10 ?? -Infinity) - (a.simulated_copy_pnl_10 ?? -Infinity)));
     }
-    else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => (b.metrics.days_win_rate || 0) - (a.metrics.days_win_rate || 0));
-    else if (sortVal === "polycop-desc") filteredTargets.sort((a, b) => (b.metrics.aggregator_opinion || 0) - (a.metrics.aggregator_opinion || 0));
+    // An absent measurement sorts below a measured zero, never as one. `|| 0`
+    // would rank a wallet nobody measured level with one measured at zero.
+    else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => sortableMetric(b, "days_win_rate") - sortableMetric(a, "days_win_rate"));
+    else if (sortVal === "polycop-desc") filteredTargets.sort((a, b) => sortableMetric(b, "aggregator_opinion") - sortableMetric(a, "aggregator_opinion"));
     else if (sortVal === "activity-desc") filteredTargets.sort((a, b) => activityHours(a) - activityHours(b));
     else if (sortVal === "trades7d-desc") filteredTargets.sort((a, b) => ((b.activity?.trades_7d) || 0) - ((a.activity?.trades_7d) || 0));
 

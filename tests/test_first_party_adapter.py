@@ -17,27 +17,13 @@ from pipeline.first_party_adapter import (
     first_party_activity,
     to_engine_metrics,
 )
+# Imported from the engine rather than restated here. A copy of the contract
+# would let a newly scored parameter pass this test while the adapter never
+# supplied it - which is the exact failure the test exists to catch.
+from screener.score_wallets import ENGINE_METRIC_INPUTS
 
 DAY = 86400
 FIRST_CLOSE = 1786000000
-
-# Every figure `calculate_bankroll_optimized_score` reads out of its metrics
-# dict. Kept here as the contract the adapter owes the engine.
-ENGINE_INPUTS = (
-    "actual_pnl",
-    "copy_pnl",
-    "hedged_pct",
-    "pl_ratio",
-    "days_win_rate",
-    "observed_days",
-    "r20_pnl",
-    "r20_slip",
-    "pnl_vol_ratio",
-    "avg_invest",
-    "markets",
-    "drawdown_depth",
-    "edge_to_friction",
-)
 
 # The aggregator field names that must never reappear on a scoring path.
 AGGREGATOR_FIELDS = (
@@ -96,7 +82,7 @@ def _metrics(**overrides):
 
 def test_every_engine_input_is_supplied():
     metrics = _metrics()
-    for key in ENGINE_INPUTS:
+    for key in ENGINE_METRIC_INPUTS:
         assert key in metrics, f"the engine reads {key} and the adapter does not supply it"
 
 

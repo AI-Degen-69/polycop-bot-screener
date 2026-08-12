@@ -180,12 +180,17 @@ def _replay_events(events: Sequence[Dict[str, Any]],
 
         if event_type != TRADE_TYPE:
             continue
-        if not (profile.min_price <= price <= profile.max_price):
-            continue
 
         side = str(event.get("side") or "").upper()
         if side == "BUY":
             book.target_shares[market] = book.target_shares.get(market, 0.0) + size
+            # The price bounds decide which markets the bot *enters*. Testing
+            # them before the side is known would also suppress exits, leaving
+            # a position the follower did open to expire worthless because the
+            # target happened to sell above the ceiling - a loss the follower
+            # never took.
+            if not (profile.min_price <= price <= profile.max_price):
+                continue
             # The Copyable Trade Window: outside it the bot does not mirror the
             # trade at all, so it contributes nothing to the copy's profit while
             # still counting in the target's. That gap is the whole of what
@@ -291,11 +296,19 @@ def replay_copy(events: Sequence[Dict[str, Any]],
 
     window = scoreable[-int(recent_window):] if recent_window > 0 else []
     window_target_pnl = sum(_number(entry.get("result_usdc")) for entry in window)
-    window_notional = sum(book.notional.get(entry.get("condition_id"), 0.0) for entry in window)
-    window_friction = sum(book.friction.get(entry.get("condition_id"), 0.0) for entry in window)
+    # Read off the mirror, not the bankroll pass. Recent Form weighs the
+    # target's own return against the friction it came through, so both terms
+    # have to describe the same trades. Measured on the bankroll pass, this
+    # figure would be drawn from whichever subset of the recent stretch the
+    # Copyable Trade Window happened to admit - and would be unmeasured
+    # entirely when it admitted none, which is a statement about the window
+    # rather than about friction. Window share is simulation-only (ADR 0006)
+    # and must not leak into a friction term here.
+    window_notional = sum(mirror.notional.get(entry.get("condition_id"), 0.0) for entry in window)
+    window_friction = sum(mirror.friction.get(entry.get("condition_id"), 0.0) for entry in window)
     # The friction the recent run came through, as a share of the capital the
-    # copy actually turned over. Expressed in percent because the Recent Form
-    # shape scores it against a percentage ceiling.
+    # mirror turned over. Expressed in percent because the Recent Form shape
+    # scores it against a percentage ceiling.
     friction_pct = (
         round(window_friction / window_notional * 100.0, 4) if window_notional > 0 else None
     )

@@ -465,6 +465,27 @@ def _hard_rejection_gates_doc() -> str:
     )
 
 
+# Every figure `calculate_bankroll_optimized_score` reads out of its metrics
+# dict. Declared here, beside the function that reads them, so an adapter can
+# be checked against the engine's real contract rather than against a copy of
+# it that drifts the moment a parameter is added.
+ENGINE_METRIC_INPUTS = (
+    "actual_pnl",
+    "copy_pnl",
+    "hedged_pct",
+    "pl_ratio",
+    "days_win_rate",
+    "observed_days",
+    "r20_pnl",
+    "r20_slip",
+    "pnl_vol_ratio",
+    "avg_invest",
+    "markets",
+    "drawdown_depth",
+    "edge_to_friction",
+)
+
+
 def _measured(value):
     """A metric that was actually measured, or None if it was not.
 
@@ -664,9 +685,13 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     actual_copy_trade = profile.copy_trade_usd
     # Sizing is stated against the target's typical trade, so an unmeasured
     # one leaves these unstated rather than describing a mirror of nothing.
+    # None rather than 0.0: a zero participation rate states that the follower
+    # would mirror none of this target's size, which is a measurement. Not
+    # knowing the target's typical trade is a different thing, and the comment
+    # above already says these stay unstated.
     participation_rate = (
         round((actual_copy_trade / avg_inv) * 100.0, 2)
-        if avg_inv is not None and avg_inv > 0 else 0.0
+        if avg_inv is not None and avg_inv > 0 else None
     )
 
     # Smallest target order whose mirrored share still clears the venue minimum
@@ -687,7 +712,9 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
             "target_avg_invest_usd": avg_inv,
             "user_copy_trade_usd": actual_copy_trade,
             "max_single_position_cap_usd": max_single_position_usd,
-            "capital_participation_rate": f"{participation_rate}%",
+            "capital_participation_rate": (
+                f"{participation_rate}%" if participation_rate is not None else "unmeasured"
+            ),
             "slippage_cost_rate": (
                 f"{slip_cost_rate*100:.2f}%" if slip_cost_rate is not None else None
             ),

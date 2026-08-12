@@ -549,7 +549,11 @@ def analyze_wallet(profile, activity, positions, copy_profile=CURRENT_PROFILE):
     settled_results = sorted(settled.values(), key=lambda entry: entry["closed_at"])
     results = [entry["result_usdc"] for entry in settled_results]
     win_rate = (sum(1 for r in results if r > 0) / len(results)) if results else None
-    realized_pnl = sum(results)
+    # None, not zero, when nothing settled. `sum([])` is 0.0, and the engine
+    # reads this field as Actual PnL: a measured break-even would earn the
+    # wallet an Edge-to-Friction reading, and a Slippage Cost Rate, computed
+    # from a figure nothing measured (ADR 0007).
+    realized_pnl = sum(results) if results else None
     open_value = sum(float(p.get("currentValue") or 0.0) for p in positions if isinstance(p, dict))
     notional = [
         float(t.get("size") or 0.0) * float(t.get("price") or 0.0) for t in trades
@@ -576,7 +580,7 @@ def analyze_wallet(profile, activity, positions, copy_profile=CURRENT_PROFILE):
         "top_markets": [m for m, _n in markets.most_common(5) if m],
         "settled_markets": len(settled),
         "win_rate": round(win_rate, 4) if win_rate is not None else None,
-        "settled_pnl_usdc": round(realized_pnl, 2),
+        "settled_pnl_usdc": round(realized_pnl, 2) if realized_pnl is not None else None,
         # The evidence behind the three figures above, kept so the equity
         # curve and the profit/loss ratio can be derived from the record rather
         # than only from a live scan.
@@ -662,7 +666,8 @@ def classify(metrics):
 
 def is_profitable(metrics):
     """Whether the wallet made money by any of the figures we actually have."""
-    if metrics.get("settled_pnl_usdc", 0.0) > 0:
+    settled = metrics.get("settled_pnl_usdc")
+    if isinstance(settled, (int, float)) and settled > 0:
         return True
     return any(
         isinstance(value, (int, float)) and value > 0
@@ -812,15 +817,26 @@ def send_alert(text):
 
 
 def maybe_alert(metrics, label):
+    """Alert on a wallet clearing the win-rate bar, if it has not been already.
+
+    Every field is read defensively. This is called with stored records as well
+    as with fresh `analyze_wallet` output - the cycle re-checks the dataset so a
+    webhook configured mid-run still delivers earlier hits - and a stored record
+    can predate any field this reads. The re-check loop runs outside the
+    per-wallet try, so one legacy record indexing a missing key would end the
+    whole run rather than skip one alert.
+    """
     win_rate = metrics.get("win_rate")
     closed = metrics.get("settled_markets") or 0
     if win_rate is None or win_rate < ALERT_WIN_RATE or closed < ALERT_MIN_CLOSED:
         return False
+    pnl = metrics.get("settled_pnl_usdc")
+    pnl_text = f"${pnl:,.0f}" if isinstance(pnl, (int, float)) else "unmeasured"
     return send_alert(
-        f"PolyCop scanner: {label.upper()} {metrics['address']} "
+        f"PolyCop scanner: {label.upper()} {metrics.get('address') or 'unknown'} "
         f"({metrics.get('pseudonym') or 'anon'})\n"
         f"win rate {win_rate:.1%} over {closed} settled markets, "
-        f"net PnL ${metrics['settled_pnl_usdc']:,.0f}, "
+        f"net PnL {pnl_text}, "
         f"{metrics.get('trades_per_day')} trades/day, "
         f"{metrics.get('distinct_markets')} markets"
     )
