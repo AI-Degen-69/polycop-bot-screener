@@ -14,9 +14,15 @@ history from the public data API and classifies it:
                    reverse-engineer needs (grid spacing, size, cadence, the
                    markets it targets).
 
-Two datasets are maintained incrementally on disk (`human_alpha.json` and
-`bot_configs.json` under app/data/) so a run that is killed mid-scan keeps
-everything it had already learned.
+One dataset is maintained incrementally on disk (`scanned_wallets.json` under
+app/data/) so a run that is killed mid-scan keeps everything it had already
+learned. Each record carries its own classification; the two files this
+replaces could disagree about the same wallet.
+
+Every record also carries the figures the 100-point audit scores from - the
+per-market settled results, the traded volume, and a replay of what copying the
+wallet would have returned under the Copy Execution Profile. They are computed
+here because this is the only moment the raw feeds exist (ADR 0012).
 
 Usage:
     python overnight_scanner.py                 # loop until stopped
@@ -44,13 +50,24 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "src"))
 
-from paths import DATA_DIR  # noqa: E402
+from paths import DATA_DIR, SCANNED_WALLETS_FILE  # noqa: E402
+from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
+from screener.first_party_copy_replay import replay_copy  # noqa: E402
+from screener.first_party_metrics import hedged_rate  # noqa: E402
+from screener.score_wallets import RECENT_FORM_WINDOW_TRADES  # noqa: E402
 
 LEADERBOARD_API = "https://lb-api.polymarket.com"
 DATA_API = "https://data-api.polymarket.com"
 
-HUMAN_FILE = os.path.join(DATA_DIR, "human_alpha.json")
-BOT_FILE = os.path.join(DATA_DIR, "bot_configs.json")
+# One record per wallet, carrying its classification. Two files let one wallet
+# hold two contradictory verdicts, and a rescan that flipped the verdict had to
+# remember to clear the losing file - a rule enforced by hand in one place and
+# forgotten everywhere else.
+SCANNED_FILE = os.path.join(DATA_DIR, SCANNED_WALLETS_FILE)
+# The datasets this replaces. Kept only so a first run under the new schema can
+# migrate them, then left alone.
+LEGACY_HUMAN_FILE = os.path.join(DATA_DIR, "human_alpha.json")
+LEGACY_BOT_FILE = os.path.join(DATA_DIR, "bot_configs.json")
 STATE_FILE = os.path.join(DATA_DIR, "scanner_state.json")
 LOG_FILE = os.path.join(DATA_DIR, "overnight_scanner.log")
 
@@ -90,7 +107,7 @@ MICRO_HOLD_SECONDS = 900.0
 
 # Bumped whenever a scoring change makes stored records incomparable to fresh
 # ones; every record below this version is re-scanned before new wallets.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 ALERT_WIN_RATE = 0.80
 ALERT_MIN_CLOSED = 50
@@ -342,7 +359,15 @@ def _grid_spacing_pct(trades):
 
 
 def _settled_market_pnl(events, positions):
-    """Per-market USDC result for every market whose outcome is already known.
+    """Per-market result record for every market whose outcome is already known.
+
+    Each entry carries the USDC result, when the market closed for this wallet,
+    and the notional it bought there. The summary figures the record used to
+    keep - total PnL, win rate, market count - are all recoverable from these,
+    but the reverse is not true: an equity curve needs the order, a
+    profit/loss ratio needs the individual results, and a copy replay needs the
+    size. Keeping the evidence rather than only its summary is what lets a
+    derived figure be audited against the record it came from.
 
     Neither feed is honest on its own. The activity feed only shows a closing
     event when the wallet sold or redeemed - and a wallet only redeems what it
@@ -362,10 +387,33 @@ def _settled_market_pnl(events, positions):
 
     pnl = {}
     shares_bought = defaultdict(float)
+    notional_bought = defaultdict(float)
     for condition, market_events in by_market.items():
         for event in market_events:
             if event.get("type") == "TRADE" and event.get("side") == "BUY":
                 shares_bought[condition] += float(event.get("size") or 0.0)
+                notional_bought[condition] += float(event.get("usdcSize") or 0.0)
+
+    def _closed_at(market_events):
+        """When this market last paid out or was sold down, for ordering.
+
+        The equity curve is built in this order, so it must be the moment the
+        result was realised rather than the moment the position was opened.
+        Falls back to the market's last event for a position the activity feed
+        never saw close - a loss read off the positions feed has no closing
+        event of its own, and dropping it from the ordering would drop it from
+        the curve.
+        """
+        closing = [
+            float(event.get("timestamp") or 0.0)
+            for event in market_events
+            if event.get("type") == "REDEEM"
+            or (event.get("type") == "TRADE" and event.get("side") == "SELL")
+        ]
+        if closing:
+            return int(max(closing))
+        stamps = [float(event.get("timestamp") or 0.0) for event in market_events]
+        return int(max(stamps)) if stamps else 0
 
     for condition, market_events in by_market.items():
         first = market_events[0]
@@ -398,7 +446,12 @@ def _settled_market_pnl(events, positions):
         if shares_out > shares_in * 1.01:
             continue
         if abs(flow) > 1.0:
-            pnl[condition] = flow
+            pnl[condition] = {
+                "condition_id": condition,
+                "result_usdc": round(flow, 4),
+                "closed_at": _closed_at(market_events),
+                "notional_usdc": round(notional_bought[condition], 4),
+            }
 
     for position in positions:
         if not isinstance(position, dict):
@@ -425,16 +478,29 @@ def _settled_market_pnl(events, positions):
         if held and worthless:
             loss = float(position.get("realizedPnl") or 0.0) - float(position.get("initialValue") or 0.0)
             if abs(loss) > 1.0:
-                pnl[condition] = loss
+                pnl[condition] = {
+                    "condition_id": condition,
+                    "result_usdc": round(loss, 4),
+                    "closed_at": _closed_at(by_market[condition]),
+                    "notional_usdc": round(notional_bought[condition], 4),
+                }
     return pnl
 
 
-def analyze_wallet(profile, activity, positions):
-    """Reduce a wallet's raw history to the metrics both datasets are built on.
+def analyze_wallet(profile, activity, positions, copy_profile=CURRENT_PROFILE):
+    """Reduce a wallet's raw history to the metrics the dataset is built on.
 
     `activity` is the data-API activity feed: TRADE rows carry the fills, and
     the REDEEM/MERGE rows around them are what close a holding period for a
     wallet that never sells.
+
+    The derived figures the scoring engine reads are computed here rather than
+    at score time, because this is the only moment the raw feeds exist: the
+    record keeps results, and persisting thousands of events per wallet would
+    be a second copy of Polymarket rather than a record of it. The copy replay
+    depends on the Copy Execution Profile, so the record states which profile
+    produced it and a record computed under a profile that no longer exists is
+    re-scanned rather than scored.
     """
     events = sorted(
         (e for e in activity if isinstance(e, dict)),
@@ -446,6 +512,18 @@ def analyze_wallet(profile, activity, positions):
     stamps = [float(t.get("timestamp") or 0.0) for t in trades if float(t.get("timestamp") or 0.0) > 0]
 
     span_days = ((stamps[-1] - stamps[0]) / 86400.0) if len(stamps) > 1 else 0.0
+    last_trade_at = int(stamps[-1]) if stamps else None
+    # Activity Recency is measured against data collection time, not read time
+    # (CONTEXT.md), so the seven-day window is anchored to the last fill this
+    # scan saw rather than to whenever someone later opens the page.
+    week_cutoff = (last_trade_at - 7 * 86400) if last_trade_at else None
+    recent = [
+        t for t in trades
+        if week_cutoff is not None and float(t.get("timestamp") or 0.0) >= week_cutoff
+    ]
+    recent_days = {
+        int(float(t.get("timestamp") or 0.0) // 86400) for t in recent
+    }
     gaps = [b - a for a, b in zip(stamps, stamps[1:]) if b >= a]
     median_gap = statistics.median(gaps) if gaps else None
     trades_per_day = (len(trades) / span_days) if span_days > 0.5 else None
@@ -465,7 +543,11 @@ def analyze_wallet(profile, activity, positions):
     markets = Counter(t.get("title") or t.get("slug") or "" for t in trades)
 
     settled = _settled_market_pnl(events, positions)
-    results = list(settled.values())
+    # Ordered by when each market closed, because everything derived from this
+    # list downstream - the equity curve above all - is a statement about
+    # sequence, and the activity feed does not arrive in that order.
+    settled_results = sorted(settled.values(), key=lambda entry: entry["closed_at"])
+    results = [entry["result_usdc"] for entry in settled_results]
     win_rate = (sum(1 for r in results if r > 0) / len(results)) if results else None
     realized_pnl = sum(results)
     open_value = sum(float(p.get("currentValue") or 0.0) for p in positions if isinstance(p, dict))
@@ -495,6 +577,35 @@ def analyze_wallet(profile, activity, positions):
         "settled_markets": len(settled),
         "win_rate": round(win_rate, 4) if win_rate is not None else None,
         "settled_pnl_usdc": round(realized_pnl, 2),
+        # The evidence behind the three figures above, kept so the equity
+        # curve and the profit/loss ratio can be derived from the record rather
+        # than only from a live scan.
+        "settled_results": settled_results,
+        # Measured here because the positions feed exists only during a scan.
+        "hedged_pct": hedged_rate(positions),
+        # What copying this wallet would have returned under the stated
+        # profile. The Toxic Copy Poison gate, the Slippage Cost Rate gate and
+        # 37 scored points all read this replay.
+        "copy_replay": replay_copy(
+            events, settled_results, copy_profile, int(RECENT_FORM_WINDOW_TRADES)
+        ),
+        "profile_fingerprint": copy_profile.fingerprint,
+        # The denominator of Edge-to-Friction: every dollar that changed hands,
+        # not the mean of it. `avg_position_usdc` above is the same series
+        # reduced to a mean, and a ratio cannot be rebuilt from a mean.
+        "traded_volume_usdc": round(sum(notional), 2),
+        # How much history the fetched window actually covers. Distinct from
+        # `history_truncated`, which says only whether the window hit its cap:
+        # a wallet can be untruncated and still have three days of record.
+        "coverage_days": round(span_days, 2),
+        # Activity Recency, measured from the fills rather than read off an
+        # aggregator's `last_active` string.
+        "last_trade_at": last_trade_at,
+        "trades_7d": len(recent),
+        "volume_7d": round(
+            sum(float(t.get("size") or 0.0) * float(t.get("price") or 0.0) for t in recent), 2
+        ),
+        "active_days_7d": len(recent_days),
         # True when the activity feed hit the page cap, so every figure above
         # describes the tail of this wallet's history rather than all of it.
         "history_truncated": len(events) >= TRADE_PAGE * MAX_TRADE_PAGES,
@@ -560,12 +671,27 @@ def is_profitable(metrics):
     )
 
 
-def to_human_record(metrics, score, reasons):
+def to_scanned_record(metrics, label, score, reasons):
+    """One wallet's record: what it is, what it did, and what copying it costs.
+
+    Replaces the two per-classification record builders. They existed because
+    the datasets were separate files, and the price of that was a wallet whose
+    verdict flipped sitting in both at once, each copy asserting a different
+    classification. One record with a `classification` field cannot disagree
+    with itself.
+
+    The union of what the two builders carried, plus the derived figures the
+    scoring engine reads. Fields only one classification ever populates - grid
+    spacing on a bot, category mix on a human - are carried for both, because
+    a field that is absent for a reason is more useful to a later reader than a
+    field that is absent by convention.
+    """
     return {
         "address": metrics["address"],
         "pseudonym": metrics["pseudonym"],
-        "classification": "human",
+        "classification": label,
         "schema_version": SCHEMA_VERSION,
+        "profile_fingerprint": metrics["profile_fingerprint"],
         "bot_score": score,
         "signals": reasons,
         "scanned_at": metrics["scanned_at"],
@@ -586,36 +712,22 @@ def to_human_record(metrics, score, reasons):
         "trade_count": metrics["trade_count"],
         "distinct_markets": metrics["distinct_markets"],
         "leaderboard": metrics["leaderboard"],
-    }
-
-
-def to_bot_record(metrics, score, reasons):
-    return {
-        "address": metrics["address"],
-        "pseudonym": metrics["pseudonym"],
-        "classification": "bot",
-        "schema_version": SCHEMA_VERSION,
-        "bot_score": score,
-        "signals": reasons,
-        "scanned_at": metrics["scanned_at"],
-        "estimated_grid_spacing_pct": metrics["grid_spacing_pct"],
-        "avg_trade_size": metrics["avg_trade_size"],
         "median_trade_size": metrics["median_trade_size"],
-        "avg_notional_usdc": metrics["avg_position_usdc"],
-        "trades_per_day": metrics["trades_per_day"],
         "median_gap_seconds": metrics["median_gap_seconds"],
         "median_hold_seconds": metrics["median_hold_seconds"],
         "fractional_size_share": metrics["fractional_size_share"],
         "extreme_price_share": metrics["extreme_price_share"],
-        "target_categories": metrics["categories"],
-        "target_markets": metrics["top_markets"],
-        "distinct_markets": metrics["distinct_markets"],
-        "trade_count": metrics["trade_count"],
-        "win_rate": metrics["win_rate"],
-        "settled_markets": metrics["settled_markets"],
-        "settled_pnl_usdc": metrics["settled_pnl_usdc"],
-        "history_truncated": metrics["history_truncated"],
-        "leaderboard": metrics["leaderboard"],
+        "estimated_grid_spacing_pct": metrics["grid_spacing_pct"],
+        # The evidence the scoring engine derives its parameters from.
+        "settled_results": metrics["settled_results"],
+        "traded_volume_usdc": metrics["traded_volume_usdc"],
+        "coverage_days": metrics["coverage_days"],
+        "last_trade_at": metrics["last_trade_at"],
+        "trades_7d": metrics["trades_7d"],
+        "volume_7d": metrics["volume_7d"],
+        "active_days_7d": metrics["active_days_7d"],
+        "hedged_pct": metrics["hedged_pct"],
+        "copy_replay": metrics["copy_replay"],
     }
 
 
@@ -716,17 +828,36 @@ def maybe_alert(metrics, label):
 
 # --------------------------------------------------------------------- loop
 
-def _forget(address, humans, bots):
-    """Drop a wallet from both datasets. True when something was removed."""
-    removed = False
-    for dataset, path in ((humans, HUMAN_FILE), (bots, BOT_FILE)):
-        if dataset.pop(address, None) is not None:
-            save_json(path, dataset)
-            removed = True
-    return removed
+def load_scanned():
+    """The wallet dataset, migrating the two legacy files on first read.
+
+    The legacy records predate the derived figures and carry an older schema
+    version, so they are re-scanned before new candidates rather than scored.
+    They are merged in anyway so the scanner knows which addresses it has
+    already seen and does not rediscover them as fresh work.
+    """
+    scanned = load_json(SCANNED_FILE, None)
+    if isinstance(scanned, dict):
+        return scanned
+
+    merged = {}
+    for path, label in ((LEGACY_BOT_FILE, "bot"), (LEGACY_HUMAN_FILE, "human")):
+        for address, record in (load_json(path, {}) or {}).items():
+            if isinstance(record, dict):
+                record.setdefault("classification", label)
+                merged[address] = record
+    return merged
 
 
-def scan_wallet(session, profile, humans, bots, state):
+def _forget(address, scanned):
+    """Drop a wallet from the dataset. True when something was removed."""
+    if scanned.pop(address, None) is None:
+        return False
+    save_json(SCANNED_FILE, scanned)
+    return True
+
+
+def scan_wallet(session, profile, scanned, state):
     address = profile["address"]
     activity = fetch_paginated(session, "activity", address, TRADE_PAGE, MAX_TRADE_PAGES)
     if not any((e.get("type") or "TRADE") == "TRADE" for e in activity if isinstance(e, dict)):
@@ -744,25 +875,17 @@ def scan_wallet(session, profile, humans, bots, state):
         # that only looked profitable under the old scoring would otherwise
         # keep that stale entry forever - re-queued for repair every cycle,
         # never rewritten, and still ranking in the dataset.
-        if _forget(address, humans, bots):
+        if _forget(address, scanned):
             log.info("%s no longer profitable - record removed", address)
         else:
             log.info("%s classified %s but not profitable - not recorded", address, label)
         return
 
-    # A rescan can also flip the verdict, so the losing dataset is cleared
-    # first - otherwise one wallet would sit in both files at once, each copy
-    # claiming a different classification.
-    if label == "bot":
-        if humans.pop(address, None) is not None:
-            save_json(HUMAN_FILE, humans)
-        bots[address] = to_bot_record(metrics, score, reasons)
-        save_json(BOT_FILE, bots)
-    else:
-        if bots.pop(address, None) is not None:
-            save_json(BOT_FILE, bots)
-        humans[address] = to_human_record(metrics, score, reasons)
-        save_json(HUMAN_FILE, humans)
+    # A rescan can flip the verdict, and one record carrying its own
+    # classification simply changes rather than needing the losing file
+    # cleared first.
+    scanned[address] = to_scanned_record(metrics, label, score, reasons)
+    save_json(SCANNED_FILE, scanned)
 
     log.info(
         "%s -> %s (score %d) trades=%s cadence=%s hold=%s win_rate=%s pnl=%.0f",
@@ -787,8 +910,7 @@ def slice_plan():
 
 def run(once=False, max_wallets=None, rescan_after_days=7):
     session = RateLimitedSession()
-    humans = load_json(HUMAN_FILE, {})
-    bots = load_json(BOT_FILE, {})
+    scanned = load_scanned()
     state = load_json(STATE_FILE, {"scanned": {}, "alerted": [], "cycle": 0})
     state.setdefault("scanned", {})
     state.setdefault("alerted", [])
@@ -804,7 +926,7 @@ def run(once=False, max_wallets=None, rescan_after_days=7):
         # for days. Re-checking the datasets every cycle - not just at startup
         # - is what makes a webhook added mid-run deliver the earlier hits
         # rather than silently losing them.
-        for record in list(humans.values()) + list(bots.values()):
+        for record in list(scanned.values()):
             address = record.get("address")
             if (address and address not in state["alerted"]
                     and maybe_alert(record, record.get("classification", ""))):
@@ -817,14 +939,16 @@ def run(once=False, max_wallets=None, rescan_after_days=7):
         slices = [plan[(cycle * 4 + i) % len(plan)] for i in range(4)]
         log.info("=== cycle %d - slices %s ===", cycle, slices)
 
-        # Records written by an older scoring pass are re-scanned before any
-        # new wallet is touched: a dataset that mixes two scorings cannot be
-        # ranked, and a stale record is worse than a missing one because it
-        # still looks authoritative. Chunked so repair shares the night with
-        # discovery instead of blocking it.
+        # Records written by an older scoring pass, or under a Copy Execution
+        # Profile that has since changed, are re-scanned before any new wallet
+        # is touched: a dataset that mixes two scorings cannot be ranked, and a
+        # stale record is worse than a missing one because it still looks
+        # authoritative. Chunked so repair shares the night with discovery
+        # instead of blocking it.
         stale = [
-            record for record in list(humans.values()) + list(bots.values())
+            record for record in list(scanned.values())
             if record.get("schema_version") != SCHEMA_VERSION
+            or record.get("profile_fingerprint") != CURRENT_PROFILE.fingerprint
         ]
         profiles = {}
         for record in stale[:REPAIR_PER_CYCLE]:
@@ -857,15 +981,16 @@ def run(once=False, max_wallets=None, rescan_after_days=7):
 
         for profile in queue:
             try:
-                scan_wallet(session, profile, humans, bots, state)
+                scan_wallet(session, profile, scanned, state)
             except Exception:  # keep the night alive through one bad wallet
                 log.exception("wallet %s failed", profile.get("address"))
             save_json(STATE_FILE, state)
 
         state["cycle"] = cycle + 1
         save_json(STATE_FILE, state)
-        log.info("cycle %d done - %d humans, %d bots on disk",
-                 cycle, len(humans), len(bots))
+        humans = sum(1 for r in scanned.values() if r.get("classification") == "human")
+        log.info("cycle %d done - %d wallets on disk (%d human, %d bot)",
+                 cycle, len(scanned), humans, len(scanned) - humans)
 
         if once:
             return

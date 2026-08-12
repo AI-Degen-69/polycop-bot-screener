@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import requests  # noqa: E402
 
-from paths import DATA_DIR, PHASE3_FILE  # noqa: E402
+from paths import DATA_DIR, PHASE3_FILE, SCANNED_WALLETS_FILE  # noqa: E402
 from execution.copy_execution_profile import CURRENT_PROFILE  # noqa: E402
 from execution.paper_trade_log import (  # noqa: E402
     COPIED,
@@ -50,7 +50,7 @@ from execution.paper_trade_log import (  # noqa: E402
 DATA_API = "https://data-api.polymarket.com"
 CLOB_API = "https://clob.polymarket.com"
 
-HUMAN_ALPHA_FILE = os.path.join(DATA_DIR, "human_alpha.json")
+HUMAN_ALPHA_FILE = os.path.join(DATA_DIR, SCANNED_WALLETS_FILE)
 PHASE3_PATH = os.path.join(DATA_DIR, PHASE3_FILE)
 PAPER_TRADE_LOG_FILE = os.path.join(DATA_DIR, "paper_trades.jsonl")
 PAPER_TRADE_STATE_FILE = os.path.join(DATA_DIR, "paper_trade_state.json")
@@ -147,6 +147,10 @@ def load_human_alpha_wallets(path=HUMAN_ALPHA_FILE, limit=DEFAULT_WALLETS_PER_AR
 
     Ranked by settled profit, because the arm is meant to carry the scanner's
     strongest claims - an unranked slice would test the file's key order.
+
+    Reads the one scanned-wallets record and selects on `classification`. It
+    used to read a separate humans file; that file could disagree with the bots
+    file about the same wallet, which is why there is now one record.
     """
     if not os.path.exists(path):
         return []

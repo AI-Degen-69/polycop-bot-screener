@@ -64,17 +64,35 @@ class TestScoreWalletsEngine(unittest.TestCase):
         res = calculate_bankroll_optimized_score(metrics)
         self.assertTrue(any("Whale Avg Invest" in r for r in res["rejection_reasons"]))
 
-    def test_site_score_prefilter_removed_sanity_floor_at_40(self):
-        """Test site score <= 60 no longer rejects, but < 40 sanity floor rejects."""
-        # 55 passes (pre-filter removed)
-        metrics_pass = {"polycop_site_score": 55.0, "actual_pnl": 1000.0, "copy_pnl": 950.0, "markets": 30, "r20_win_rate": 60.0}
-        res_pass = calculate_bankroll_optimized_score(metrics_pass)
-        self.assertFalse(any("PolyCop Site Score" in r for r in res_pass["rejection_reasons"]))
+    def test_the_aggregator_score_no_longer_gates_at_any_value(self):
+        """ADR 0012: the aggregator's opinion reaches no gate.
 
-        # 35 fails (sanity floor at 40)
-        metrics_fail = {"polycop_site_score": 35.0, "actual_pnl": 1000.0, "copy_pnl": 950.0}
-        res_fail = calculate_bankroll_optimized_score(metrics_fail)
-        self.assertTrue(any("PolyCop Site Score" in r for r in res_fail["rejection_reasons"]))
+        It was the one gate with no first-party substitute, and its ranking was
+        measured to be anti-correlated with copyability - its own 100/100
+        wallet buys at a median 0.999 for a maximum 0.1% per fill. Keeping it
+        would have let that ranking decide which wallets got scored at all.
+
+        A wallet the aggregator rates at zero, and one it never rated, are both
+        judged on their own fills. What stops an arbitrary address being scored
+        is now Track Record Length and Whale Avg Invest, both measured from the
+        wallet itself.
+        """
+        for site_score in (0.0, 35.0, 55.0, None):
+            with self.subTest(site_score=site_score):
+                metrics = {"actual_pnl": 1000.0, "copy_pnl": 950.0, "markets": 30}
+                if site_score is not None:
+                    metrics["polycop_site_score"] = site_score
+                res = calculate_bankroll_optimized_score(metrics)
+                self.assertFalse(
+                    any("Site Score" in r for r in res["rejection_reasons"]),
+                    f"the aggregator's score still gates at {site_score}",
+                )
+
+    def test_no_gate_in_the_spec_reads_the_aggregator(self):
+        from screener.score_wallets import SCORING_SPEC
+
+        for gate in SCORING_SPEC["gates"]:
+            self.assertNotIn("Site Score", gate["name"])
 
     def test_divergence_gate_negative_recent_vs_positive_lifetime(self):
         """Test Divergence Gate: r20_pnl < 0 while actual_pnl > 1000."""

@@ -1,5 +1,12 @@
 # Wallet metrics come from first-party fills, not the aggregator's precomputed fields
 
+> **Status: implemented** on `feat/first-party-fills`. Phase 1 keeps addresses only, the scoring
+> engine reads `pipeline/first_party_adapter`, the aggregator adapter is deleted, and
+> `tests/test_first_party_provenance.py` fails if an aggregator metric reappears on a scoring path.
+> Two expectations below turned out differently, and ADR 0014 records why: the blast radius was
+> every scored parameter rather than a subset, and no parameter had to be dropped or reweighted,
+> because each one had a first-party substitute. The verdict remains third-party, as stated.
+
 Every figure the screen reads today arrives precomputed from the third-party
 PolyCop leaderboard API: `actual_pnl`, `copy_backtest_pnl`, `hedged_pct`,
 `avg_profit_loss_ratio`, `r20_wr`, `daily_stats_json`. The pipeline has no way

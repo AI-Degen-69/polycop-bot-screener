@@ -22,9 +22,16 @@ from execution.copy_execution_profile import CURRENT_PROFILE
 # not part of the Copy Execution Profile.
 WHALE_AVG_INVEST_LIMIT_USD = 200.0
 
-# Sanity floor for manually pasted addresses. The leaderboard site-score pre-filter
-# is gone, so this is what stops arbitrary garbage from being scored.
-SITE_SCORE_SANITY_FLOOR = 40.0
+# The site-score sanity floor is gone (the ADR 0012 cutover). It was the one
+# gate with no first-party equivalent, and inventing a proxy would have
+# smuggled the aggregator's ranking back in under another name - a ranking
+# measured to be anti-correlated with copyability. Its job, stopping arbitrary
+# garbage from being scored, is done by Track Record Length and Whale Avg
+# Invest, both measured from the wallet's own fills.
+#
+# GEM_SITE_SCORE_MAX below survives and still reads the aggregator's opinion.
+# That is deliberate and is not a judgment: a Hidden Gem is defined by the two
+# opinions disagreeing, so one of them has to be theirs.
 
 # Toxic Copy Poison: a modelled copy that loses money is not a target. The
 # name uses CONTEXT.md's term "Modelled Copy PnL" — never "backtest copy PnL"
@@ -150,11 +157,6 @@ SIM_TIER_C_MIN = 0.30
 
 SCORING_SPEC = {
     "gates": [
-        {
-            "name": "PolyCop Site Score sanity floor",
-            "condition": f"< {SITE_SCORE_SANITY_FLOOR:.0f} / 100",
-            "reason": "stops manually pasted garbage from being scored once the leaderboard pre-filter is gone",
-        },
         {
             "name": "Toxic Copy Poison",
             "condition": f"Modelled Copy PnL < ${MODELLED_COPY_PNL_MIN_USD:.0f}",
@@ -556,7 +558,6 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     pnl_vol = _figure(metrics, "pnl_vol_ratio", 0.0)
     mkts = _figure(metrics, "markets", 0)
     avg_inv = _figure(metrics, "avg_invest", 0.0)
-    polycop_site_score = _figure(metrics, "polycop_site_score", 0.0)
     # These three are measured rather than read off the leaderboard, and any of
     # them can be unavailable. None means unmeasured and scores nothing: a
     # default would hand out points the wallet never earned, which is exactly
@@ -582,7 +583,6 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
     # measurement nobody took - the failure ADR 0007 exists to prevent, in the
     # one place where it decides a wallet's fate outright.
     for figure, gate_name in (
-        (polycop_site_score, "PolyCop Site Score"),
         (copy_pnl, "Modelled Copy PnL"),
         (slip_cost_rate, "Slippage Cost Rate"),
         (hedged, "Hedged Rate"),
@@ -593,8 +593,6 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         if figure is None:
             rejection_reasons.append(f"{gate_name} unmeasured (gate cannot be evaluated)")
 
-    if polycop_site_score is not None and polycop_site_score < SITE_SCORE_SANITY_FLOOR:
-        rejection_reasons.append(f"PolyCop Site Score {polycop_site_score:.0f} < {SITE_SCORE_SANITY_FLOOR:.0f}/100 sanity floor")
     if copy_pnl is not None and copy_pnl < MODELLED_COPY_PNL_MIN_USD:
         rejection_reasons.append("Modelled Copy PnL < $0 (Toxic Copy Poison)")
     if slip_cost_rate is not None and slip_cost_rate > SLIPPAGE_COST_RATE_GATE:

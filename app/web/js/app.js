@@ -334,8 +334,8 @@ function filterAndRender() {
         filteredTargets.sort((a, b) =>
             ((b.simulated_copy_pnl_10 ?? -Infinity) - (a.simulated_copy_pnl_10 ?? -Infinity)));
     }
-    else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => b.metrics.r20_win_rate - a.metrics.r20_win_rate);
-    else if (sortVal === "polycop-desc") filteredTargets.sort((a, b) => b.metrics.polycop_site_score - a.metrics.polycop_site_score);
+    else if (sortVal === "wr-desc") filteredTargets.sort((a, b) => (b.metrics.days_win_rate || 0) - (a.metrics.days_win_rate || 0));
+    else if (sortVal === "polycop-desc") filteredTargets.sort((a, b) => (b.metrics.aggregator_opinion || 0) - (a.metrics.aggregator_opinion || 0));
     else if (sortVal === "activity-desc") filteredTargets.sort((a, b) => activityHours(a) - activityHours(b));
     else if (sortVal === "trades7d-desc") filteredTargets.sort((a, b) => ((b.activity?.trades_7d) || 0) - ((a.activity?.trades_7d) || 0));
 
@@ -487,19 +487,46 @@ function renderGrid() {
                 <span class="badge-gem">💎 GEM</span>
                 <div class="gem-tooltip-text">
                     <strong>💎 Hidden Gem Detected!</strong><br>
-                    PolyCop under-rated site score (&lt;75), but passes all 8 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;71)</strong>!
+                    PolyCop under-rated site score (&lt;75), but passes all 7 Hard Rejection Gates with an <strong>A-Tier Screener Score (&ge;71)</strong>!
                 </div>
             </div>
         ` : '';
 
         const lastActive = formatLastActive(t);
-        const buyPrice = t.metrics ? (t.metrics.buy_price || 0.0) : 0.0;
-        const highBuyBadgeHtml = buyPrice > 0.85 ? `
+        // How the wallet was measured, as distinct from what the measurement
+        // said. A score built on six hours of fills and one built on four
+        // months are not comparable, and a reader can only know which is which
+        // if the card says so (ADR 0012, feed v2).
+        const annotations = t.annotations || {};
+        const coverageDays = annotations.coverage_days;
+        const provenanceBits = [];
+        if (annotations.classification) {
+            provenanceBits.push(annotations.classification === "bot" ? "🤖 bot-shaped" : "🧑 human-shaped");
+        }
+        if (typeof coverageDays === "number") {
+            provenanceBits.push(`${coverageDays.toFixed(0)}d measured`);
+        }
+        if (annotations.history_truncated) {
+            provenanceBits.push("⚠️ truncated window");
+        }
+        const provenanceHtml = provenanceBits.length ? `
+            <div class="wallet-card-provenance" title="How this wallet was measured, from its own Polymarket fills">
+                ${provenanceBits.join(" · ")}
+            </div>
+        ` : '';
+        // Measured from the wallet's own fills: the share of them struck at
+        // 3c/97c. It replaces an average buy price the aggregator reported,
+        // and it is the sharper signal — an average hides a wallet that mixes
+        // real positions with near-certainties, and a share does not.
+        const extremeShare = t.metrics ? t.metrics.extreme_price_share : null;
+        const highBuyBadgeHtml = (typeof extremeShare === "number" && extremeShare > 0.15) ? `
             <div class="badge-high-buy-wrapper" style="display:inline-block;">
-                <span class="badge-high-buy">⚠️ High Buy ($${buyPrice.toFixed(2)})</span>
+                <span class="badge-high-buy">⚠️ Extremes ${(extremeShare * 100).toFixed(0)}%</span>
                 <div class="gem-tooltip-text" style="border-color: #f59e0b;">
-                    <strong>⚠️ High Entry Price Warning ($${buyPrice.toFixed(2)})!</strong><br>
-                    This trader buys at $0.85–$0.99 (Dust Yield Farming). Set <strong>Max Price: 0.95</strong> in backtest controls!
+                    <strong>⚠️ ${(extremeShare * 100).toFixed(0)}% of fills at 3c/97c!</strong><br>
+                    A wallet buying near-certainties wins often and gains almost nothing per fill —
+                    the shape that tops the leaderboard and cannot be copied.
+                    Set <strong>Max Price: 0.95</strong> in backtest controls.
                 </div>
             </div>
         ` : '';
@@ -514,6 +541,7 @@ function renderGrid() {
                             ${highBuyBadgeHtml}
                         </div>
                         ${subAddrHtml}
+                        ${provenanceHtml}
                     </div>
                     <div class="score-badge">${t.final_score} Pts</div>
                 </div>
@@ -914,7 +942,12 @@ function openModal(idx) {
     renderBalanceMiss(target);
     renderSkipReasons(target);
     renderCapSweep(target);
-    document.getElementById("modalPolyCopScore").innerText = `${target.metrics.polycop_site_score} / 100 Site`;
+    const aggregatorOpinion = target.metrics.aggregator_opinion;
+    // Labelled as an opinion because that is all it is now: it reaches no
+    // gate and no scored parameter, and survives only so a Hidden Gem can be
+    // defined as the two opinions disagreeing (ADR 0012).
+    document.getElementById("modalPolyCopScore").innerText =
+        (typeof aggregatorOpinion === "number") ? `${aggregatorOpinion} / 100 Site` : "not rated";
     
     // Set correct external profile & platform links
     document.getElementById("modalPolymarketLink").href = `https://polymarket.com/@${target.address}`;
@@ -929,7 +962,12 @@ function openModal(idx) {
     document.getElementById("cardCopyPnl").style.color = target.metrics.copy_pnl >= 0 ? "#10b981" : "#ef4444";
     document.getElementById("cardPlRatio").innerText = `${plRatio.toFixed(2)}x`;
     document.getElementById("cardPlRatio").style.color = plColor;
-    document.getElementById("cardWinRate").innerText = `${target.metrics.r20_win_rate}%`;
+    // The copy-adjusted green-day rate, which is what the screen measures. The
+    // recent-20 win rate it replaces came precomputed from the aggregator and
+    // has no first-party equivalent.
+    const greenRate = target.metrics.days_win_rate;
+    document.getElementById("cardWinRate").innerText =
+        (typeof greenRate === "number") ? `${greenRate.toFixed(1)}%` : "unmeasured";
     document.getElementById("cardRoi").innerText = `${target.metrics.pnl_vol_ratio}%`;
     document.getElementById("cardMarkets").innerText = `${target.metrics.markets} / $${(target.metrics.copy_pnl * 5).toLocaleString('en-US', {maximumFractionDigits:0})}`;
     document.getElementById("cardFloorMin").innerText = `$${target.bankroll_analysis.min_target_order_floor_usd.toFixed(2)}`;
