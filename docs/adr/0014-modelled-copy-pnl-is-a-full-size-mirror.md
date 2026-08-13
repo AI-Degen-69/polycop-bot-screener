@@ -55,25 +55,65 @@ The gate is discriminating again rather than rejecting categorically, and the to
 Whale Avg Invest - the correct answer for a sample drawn from the volume leaderboard, where a
 typical trade dwarfs a $100 bankroll.
 
-## The tier bands do not move
+## The tier bands were re-measured, and they hold
 
-**The bands stay at S 80 / A 71 / B 65 / C 56.**
+**The bands stay at S 80 / A 71 / B 65 / C 56 - measured, not inherited.**
 
-Three scoreable wallets cannot calibrate an absolute floor. ADR 0005 and ADR 0010 both re-measured
-against a full scored run, and the honest reading of a three-wallet sample is that it does not
-support moving anything. Setting the bands so that these three land in a flattering tier would be
-fitting the scale to the sample, which is exactly what an absolute floor exists to prevent.
+An earlier revision of this ADR deferred the calibration because only 3 wallets were scoreable. The
+scanner has since re-measured the whole dataset under the current profile. Run on 2026-08-13 over
+**511 records, 0 stale**:
 
-The re-measurement is therefore **owed, not done**. It runs when the scanner has re-measured the
-whole dataset under the current profile:
+| | |
+| :--- | :--- |
+| Scoreable | 68 |
+| Rejected by a gate | 443 |
+| Score distribution | min 26.07, p25 33.98, **median 44.59**, p75 56.02, max 90.60 |
 
-```
-python overnight_scanner.py          # until the stale-record count reaches zero
-python tools/measure_tier_bands.py
-```
+At the existing floors the 68 survivors fall out as **5 S-Tier, 7 A-Tier, 2 B-Tier, 4 C-Tier,
+50 F-Tier**.
 
-Until then, every wallet grading F-Tier is the expected reading of a distribution built on 26
-records of which most are high-frequency bots - not evidence that the engine is broken.
+That is a working scale, so nothing moves. The S-Tier admits 7.3% of survivors - selective without
+being empty, which is the failure ADR 0005's method guards against in both directions. The median
+sits at 44.59, well below the C floor, so most survivors are correctly graded mediocre rather than
+clustering into a flattering band. The top of the range reaches 90.60 without saturating, so the
+scale still has room above its best wallet.
+
+The bands were calibrated against the aggregator's distribution and they survive the change of
+source. That is a result rather than a formality: every input is different and the shape they
+produce is still one these floors describe.
+
+**What would change them.** A candidate pool sized to the bankroll (see below). If the Whale gate
+stops rejecting half the field, the surviving population is a different one and these floors are
+owed a fresh measurement.
+
+## The rejections say more than the scores do
+
+Of 443 rejections:
+
+| Gate | Count |
+| :--- | ---: |
+| Whale Avg Invest | 255 |
+| Slippage Cost Rate | 242 |
+| Divergence | 108 |
+| Modelled Copy PnL | 87 |
+| Track Record Length | 57 |
+| P/L Ratio (measured) | 37 |
+| Hedged Rate (measured) | 22 |
+
+Two readings matter.
+
+**152 rejections are for an absent measurement, not a bad one** - 51 P/L Ratio, 41 Hedged Rate, 30
+Modelled Copy PnL, 30 Slippage Cost Rate. Those wallets were not judged and found wanting; the scan
+could not measure them. P/L Ratio needs both a win and a loss, and Hedged Rate needs a non-empty
+positions feed. Failing closed is the right call for a gate (ADR 0007), but a third of the
+rejections being coverage rather than verdict is a fact about the scan, not about the wallets.
+
+**The dominant rejector is a bankroll constraint.** Whale Avg Invest removes 255 of 511 - half the
+field - because a typical trade dwarfs a $100 bankroll. The Paper Trade Log (ADR 0013) shows the
+same thing from the other side: 76 of its first 91 observed trades fell outside the Copyable Trade
+Window, so that bankroll could mirror roughly 4% of what these wallets do. The screen is working;
+the bankroll is the binding constraint on which wallets are reachable at all, and no amount of
+screening changes that.
 
 ## Consequences
 

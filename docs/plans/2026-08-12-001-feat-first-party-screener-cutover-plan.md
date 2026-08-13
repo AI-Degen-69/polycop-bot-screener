@@ -18,9 +18,10 @@ origin: docs/adr/0012-metrics-come-from-first-party-fills.md
 >    the Slippage Cost Rate gate: against a scaled copy, `(actual − copy)/actual` measures the
 >    bankroll rather than the friction. Modelled Copy PnL is a **full-size mirror** at a fixed 2% per
 >    side. The plan's own risk section named this as U2's load-bearing assumption; it did not hold.
-> 2. **U7 requires the tier bands to be re-measured.** They were measured and deliberately **not
->    moved**: only 3 wallets are scoreable under the current profile, which cannot calibrate an
->    absolute floor. The re-measurement is owed once the scanner has re-run the dataset.
+> 2. **U7 requires the tier bands to be re-measured.** They were, over all 511 records once the
+>    scanner had re-run, and they **hold unchanged** at S 80 / A 71 / B 65 / C 56 - 68 scoreable
+>    wallets, median 44.59, five clearing the S floor. The unit's premise that the cutover would
+>    force new floors did not hold.
 
 ## Goal Capsule
 
