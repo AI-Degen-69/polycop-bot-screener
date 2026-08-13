@@ -8,6 +8,37 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from paths import DATA_DIR, PHASE1_FILE
 
+# The aggregator's own score, kept under a name that says whose opinion it is.
+# It reaches no gate and no scored parameter; its only consumer is the Hidden
+# Gem comparison, which is defined by the two opinions disagreeing.
+AGGREGATOR_OPINION_KEY = "aggregator_opinion"
+
+
+def _keep_address_only(profile, aggregator_score):
+    """One discovered candidate, stripped to what this project will trust.
+
+    The ADR 0012 boundary, in code. The leaderboard returns a full profile of
+    precomputed metrics - `actual_pnl`, `copy_backtest_pnl`, `hedged_pct`,
+    `r20_wr`, `daily_stats_json` and their siblings - and this project measured
+    that ranking to be anti-correlated with copyability: its 100/100 wallet buys
+    at a median price of 0.999 for a maximum gain of 0.1% per fill.
+
+    So the address survives and the judgments do not. Dropping them here rather
+    than ignoring them downstream is what makes the rule checkable: a field that
+    is never written cannot be read back by accident three refactors later.
+    """
+    address = profile.get("address") or profile.get("wallet") or profile.get("user")
+    if not address:
+        return None
+    name = profile.get("name") or profile.get("username") or profile.get("pseudonym")
+    kept = {"address": address}
+    if name:
+        kept["name"] = name
+    if aggregator_score is not None:
+        kept[AGGREGATOR_OPINION_KEY] = aggregator_score
+    return kept
+
+
 def fetch_and_scrape_leaderboard(min_score=None):
     """
     Phase 1: Paginate through all pages of PolyCop leaderboard API and scrape raw profiles.
@@ -52,8 +83,9 @@ def fetch_and_scrape_leaderboard(min_score=None):
                     polycop_score = float(p.get("score", p.get("polycop_score", 0.0)))
                     if min_score is not None and polycop_score <= min_score:
                         continue
-                    p["polycop_site_score"] = polycop_score
-                    all_profiles.append(p)
+                    kept = _keep_address_only(p, polycop_score)
+                    if kept:
+                        all_profiles.append(kept)
 
                 print(f"Page {page}: Fetched {len(profiles)} profiles. Total kept ({scope}): {len(all_profiles)}")
                 

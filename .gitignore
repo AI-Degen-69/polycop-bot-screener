@@ -9,6 +9,11 @@ __pycache__/
 app/data/*.json
 !app/data/.gitkeep
 
+# The Paper Trade Log and its cursors. An experimental record accumulated by a
+# long-running poller, not source: committing it would make every poll a diff.
+app/data/paper_trades.jsonl
+app/data/paper_trade_state.json
+
 # Environment & logs
 .env
 .env.*
@@ -29,3 +34,6 @@ node_modules/
 .freebuff/desktop-v2.db-shm
 .freebuff/desktop-v2.db-wal
 app/data/run_mock_cache/
+
+# Scratch artifacts from side sessions. Not part of any change.
+.freebuff/

@@ -33,6 +33,10 @@ PHASE1_FILE = "phase1_scraped_wallets.json"
 PHASE2_FILE = "phase2_verified_targets.json"
 PHASE3_FILE = "phase3_simulated_targets.json"
 
+# The scanner's first-party measurements, one record per wallet. Phase 1
+# discovers addresses; every figure the audit scores comes from here (ADR 0012).
+SCANNED_WALLETS_FILE = "scanned_wallets.json"
+
 # Make the app/src packages (pipeline, screener, server, execution) and the
 # tools package importable by name. `tools` is a package under the repo root,
 # so it needs PROJECT_ROOT on the path — inserting TOOLS_DIR alone would make

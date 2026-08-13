@@ -144,7 +144,11 @@ class TestEndpointFunctions(unittest.TestCase):
             with mock.patch("pipeline.orchestrator.run_pipeline", return_value=feed):
                 status, payload = endpoint_rescan("/api/rescan", "")
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"feed_version": 1, "simulated_targets": []})
+        # Read from the constant rather than pinned here: the projection owns
+        # what version it speaks, and a bump should not need a test edit.
+        from server.feed_projection import FEED_VERSION
+
+        self.assertEqual(payload, {"feed_version": FEED_VERSION, "simulated_targets": []})
 
     def test_rescan_fails_when_the_pipeline_produces_no_file(self):
         # The status mapping lives in the router, so this goes through

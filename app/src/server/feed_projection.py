@@ -8,10 +8,17 @@ module projects that file through the API boundary: the raw file stays the
 single source of truth (screen.py, the tests and the audit record read it),
 and the page gets exactly the fields it renders and nothing it does not.
 
-Contract: `feed_version` 1. A page that speaks version 1 reads these keys; a
-page that speaks version 2 must not be pointed at this endpoint. Bump
+Contract: `feed_version` 2. A page that speaks version 2 reads these keys; a
+page that speaks a different version must not be pointed at this endpoint. Bump
 FEED_VERSION when the shape changes, and let the tests in
 tests/test_feed_projection.py document what each version carried.
+
+Version 2 carries the provenance a reader needs now that every figure is
+measured rather than reported (ADR 0012): what the scanner called each wallet,
+how much of its history the measurement covered, and how many discovered
+candidates have not been measured at all. Under version 1 a wallet nobody had
+measured and a wallet that was rejected were both simply absent from the feed,
+which reads as a verdict the screen never reached.
 """
 
 # The page renders at most this many decision-log and balance-miss rows, then
@@ -19,7 +26,7 @@ tests/test_feed_projection.py document what each version carried.
 # total, and the raw file keeps the full log for the audit record.
 MODAL_LIST_CAP = 12
 
-FEED_VERSION = 1
+FEED_VERSION = 2
 
 # The per-wallet fields the page reads. Whitelisted explicitly so a field the
 # pipeline adds later cannot silently balloon the feed: it enters the contract
@@ -47,6 +54,10 @@ WALLET_FIELDS = (
     "breakdown_labels",
     "breakdown_points",
     "radar_labels",
+    # How the wallet was measured, as distinct from what the measurement said.
+    # A reader comparing two scores needs to know one came from four months of
+    # fills and the other from six hours (ADR 0012).
+    "annotations",
 )
 
 # The capped lists, mapped to the key that carries their true total.
@@ -65,6 +76,10 @@ SUMMARY_FIELDS = (
     "fallback_reason",
     "total_targets_evaluated",
     "simulated_survivors_count",
+    # Candidates the screen has not judged, kept apart from the ones it
+    # rejected. Collapsing the two would report scan coverage as a verdict.
+    "pending_measurement_count",
+    "stale_profile_count",
     "cap_sweep_levels",
     "cap_sweep_baseline_cap",
     "cap_sweep_backtested",
