@@ -11,9 +11,11 @@ from screener.score_wallets import (
     TIER_C_MIN,
     TIER_S_MIN,
     TRACK_RECORD_LENGTH_MIN_MARKETS,
+    WHALE_AVG_INVEST_BANKROLL_MULTIPLE,
     calculate_bankroll_optimized_score,
     calculate_edge_retention,
     grade_for_score,
+    whale_avg_invest_limit_usd,
 )
 
 class TestScoreWalletsEngine(unittest.TestCase):
@@ -59,10 +61,38 @@ class TestScoreWalletsEngine(unittest.TestCase):
         self.assertGreaterEqual(res["final_score"], TIER_S_MIN)
 
     def test_whale_gate_at_200(self):
-        """Test Hard Gate: Avg Invest > $200.00 USD."""
+        """Test Hard Gate: Avg Invest > $200.00 USD at the default $100 profile."""
         metrics = {"polycop_site_score": 75.0, "actual_pnl": 1000.0, "copy_pnl": 950.0, "avg_invest": 250.0}
         res = calculate_bankroll_optimized_score(metrics)
         self.assertTrue(any("Whale Avg Invest" in r for r in res["rejection_reasons"]))
+
+    def test_whale_gate_scales_with_the_bankroll(self):
+        """A target rejected as a whale on one bankroll passes on a larger one.
+
+        The gate is a ratio, so the same $250 target is a whale to a $100
+        follower and an ordinary trade to a $1000 one. Held as a fixed dollar
+        limit it would reject this wallet at every bankroll, capping the
+        eligible field at whatever the smallest bot could reach.
+        """
+        metrics = {"polycop_site_score": 75.0, "actual_pnl": 1000.0, "copy_pnl": 950.0, "avg_invest": 250.0}
+
+        rejected = calculate_bankroll_optimized_score(metrics, user_capital=100.0)
+        self.assertTrue(any("Whale Avg Invest" in r for r in rejected["rejection_reasons"]))
+
+        admitted = calculate_bankroll_optimized_score(metrics, user_capital=1000.0)
+        self.assertFalse(any("Whale Avg Invest" in r for r in admitted["rejection_reasons"]))
+
+    def test_whale_limit_is_the_stated_multiple_of_the_bankroll(self):
+        """The limit is derived from the profile, never a restated constant."""
+        from execution.copy_execution_profile import CURRENT_PROFILE
+
+        for bankroll in (100.0, 250.0, 500.0, 1000.0):
+            with self.subTest(bankroll=bankroll):
+                profile = CURRENT_PROFILE.with_bankroll(bankroll)
+                self.assertAlmostEqual(
+                    whale_avg_invest_limit_usd(profile),
+                    WHALE_AVG_INVEST_BANKROLL_MULTIPLE * bankroll,
+                )
 
     def test_site_score_prefilter_removed_sanity_floor_at_40(self):
         """Test site score <= 60 no longer rejects, but < 40 sanity floor rejects."""

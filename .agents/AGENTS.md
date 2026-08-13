@@ -25,7 +25,7 @@ Never quote a gate threshold or point weight from memory — read it from the ge
 | Hedged Rate | `> 3.0%` | market-making signature and doubled friction legs |
 | Profit/Loss Ratio | `< 0.3` | winning pennies, losing dollars |
 | Track Record Length | `< 25 lifetime markets` | a short record is a streak, not a track record; measured in lifetime markets because the daily activity series is a rolling window that cannot measure lifetime trades |
-| Whale Avg Invest | `> $200` | a typical trade that dwarfs the bankroll cannot be mirrored |
+| Whale Avg Invest | `> 2x bankroll ($200 at the $100 profile)` | a typical trade that dwarfs the bankroll cannot be mirrored |
 | Divergence | `r20_pnl < $0 while actual_pnl > $1,000` | a dead edge must not be carried by history |
 
 #### Continuous Parameters (100 points total)

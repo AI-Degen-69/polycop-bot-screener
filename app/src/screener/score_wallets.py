@@ -19,8 +19,19 @@ from execution.copy_execution_profile import CURRENT_PROFILE
 
 # Whale gate: a target whose typical trade dwarfs the bankroll cannot be mirrored at
 # any sane participation rate. A screening gate rather than a bot setting, so it is
-# not part of the Copy Execution Profile.
-WHALE_AVG_INVEST_LIMIT_USD = 200.0
+# not part of the Copy Execution Profile — but it is stated as a multiple of the
+# bankroll rather than a dollar figure, because "dwarfs the bankroll" is a ratio.
+#
+# A fixed $200 limit reproduces this multiple at the $100 profile and stops
+# meaning anything away from it: at a $1000 bankroll it would reject a target
+# trading a fifth of that bankroll as a whale, holding the eligible field at
+# whatever the $100 bot could reach however the follower is funded.
+WHALE_AVG_INVEST_BANKROLL_MULTIPLE = 2.0
+
+
+def whale_avg_invest_limit_usd(profile) -> float:
+    """The largest typical target trade this profile can still mirror."""
+    return WHALE_AVG_INVEST_BANKROLL_MULTIPLE * profile.bankroll_usd
 
 # Sanity floor for manually pasted addresses. The leaderboard site-score pre-filter
 # is gone, so this is what stops arbitrary garbage from being scored.
@@ -182,7 +193,15 @@ SCORING_SPEC = {
         },
         {
             "name": "Whale Avg Invest",
-            "condition": f"> ${WHALE_AVG_INVEST_LIMIT_USD:.0f}",
+            # A multiple, so the row stays true at every bankroll. The dollar
+            # figure follows in parentheses because the gate is easier to read
+            # against a number, and it is rendered from the current profile
+            # rather than restated, so a reprofile moves the docs with it.
+            "condition": (
+                f"> {WHALE_AVG_INVEST_BANKROLL_MULTIPLE:.0f}x bankroll "
+                f"(${whale_avg_invest_limit_usd(CURRENT_PROFILE):.0f} "
+                f"at the ${CURRENT_PROFILE.bankroll_usd:.0f} profile)"
+            ),
             "reason": "a typical trade that dwarfs the bankroll cannot be mirrored",
         },
         {
@@ -568,8 +587,11 @@ def calculate_bankroll_optimized_score(metrics, user_capital=None, profile=CURRE
         rejection_reasons.append(f"P/L Ratio {pl_ratio:.2f}x < {PL_RATIO_GATE:.1f}x")
     if mkts < TRACK_RECORD_LENGTH_MIN_MARKETS:
         rejection_reasons.append(f"Track Record Length ({int(mkts)} lifetime markets < {TRACK_RECORD_LENGTH_MIN_MARKETS:.0f})")
-    if avg_inv > WHALE_AVG_INVEST_LIMIT_USD:
-        rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > ${WHALE_AVG_INVEST_LIMIT_USD:.0f})")
+    # Read off the profile in force for this call, not a module constant, so a
+    # scored result and the bankroll it was scored for can never disagree.
+    whale_limit = whale_avg_invest_limit_usd(profile)
+    if avg_inv > whale_limit:
+        rejection_reasons.append(f"Whale Avg Invest (${avg_inv:.2f} > ${whale_limit:.0f})")
     if r20_pnl < 0 and actual_pnl > DIVERGENCE_LIFETIME_PNL_USD:
         rejection_reasons.append(f"Divergence Gate: Negative Recent Form (${r20_pnl:.2f}) vs strongly positive lifetime PnL (${actual_pnl:.2f})")
 
