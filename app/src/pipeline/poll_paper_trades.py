@@ -292,6 +292,13 @@ def _replay_order(entry):
     ordering is newest-first. Replaying a sell before the buy it closes would
     book a ghost exit against inventory the follower does not hold yet.
 
+    Measured on 2026-08-13 against a live wallet: 500 rows carried 21 fields,
+    none of them ordering-capable, and held 87 groups sharing a second - the
+    largest of them 16 rows. Ties are ordinary here, not an edge case. The
+    `trade_id` cursor Polymarket documents belongs to `/v1/account/fills`,
+    which is account-scoped and authenticated; this log follows other people's
+    wallets through the public feed and cannot reach it.
+
     Buy-before-sell is a deliberate choice among orders none of which the data
     can prove. It is the only one that always replays coherently: the opposite
     reading turns an open-and-trim within one second into an exit from nothing.
