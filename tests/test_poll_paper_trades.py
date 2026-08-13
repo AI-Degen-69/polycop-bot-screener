@@ -156,6 +156,48 @@ def test_two_fills_in_one_transaction_are_told_apart():
     assert activity_key(buy) != activity_key(sell)
 
 
+def test_a_buy_replays_before_a_sell_stamped_to_the_same_second():
+    """The activity endpoint exposes no sequence and answers newest-first, so
+    rows sharing a second carry no true order. Replaying the sell first would
+    book a ghost exit against inventory the follower does not hold yet."""
+    sell = _trade(1000, tx="0xsell", side="SELL", price=0.8)
+    buy = _trade(1000, tx="0xbuy", side="BUY")
+    fresh = new_activity_since([sell, buy], None)
+    assert [entry["side"] for entry in fresh] == ["BUY", "SELL"]
+
+
+def test_a_row_with_an_unreadable_timestamp_is_skipped_not_fatal():
+    """One malformed row would otherwise raise out of a float() and end a
+    poller meant to run unattended for weeks."""
+    broken = _trade(1000, tx="0xbad")
+    broken["timestamp"] = "not-a-number"
+    good = _trade(1100, tx="0xgood")
+
+    fresh = new_activity_since([broken, good], 1000)
+    assert [entry["transactionHash"] for entry in fresh] == ["0xgood"]
+
+    session = FakeSession([[broken]])
+    records, cursor = poll_wallet(session, HUMAN_ALPHA_ARM, WALLET, 1000,
+                                  _portfolio(), now=2000)
+    assert records == []
+    assert cursor == 1000
+
+
+def test_a_short_page_does_not_forget_a_fill_an_earlier_page_carried():
+    """Rebuilding the key set from the current page alone would forget a fill
+    a stale or partial page omits, and the next poll would append a second
+    record for a trade already in the log."""
+    first = _trade(1000, tx="0xaaa")
+    second = _trade(1000, tx="0xbbb", shares=50.0)
+    cursor = advance_cursor([first, second], 1000)
+    assert len(cursor["keys"]) == 2
+
+    # A later page that only carries one of them must not drop the other.
+    merged = advance_cursor([first], 1000, previous=cursor)
+    assert len(merged["keys"]) == 2
+    assert new_activity_since([first, second], merged) == []
+
+
 def test_a_cursor_written_before_ties_were_handled_still_reads():
     """The poller runs unattended for weeks, so an upgrade meets a state file
     already on disk. Its second counts as consumed: which rows inside it were

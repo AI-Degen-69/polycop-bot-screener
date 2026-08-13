@@ -265,6 +265,42 @@ def _arm_state(state, arm, profile):
 
 # -------------------------------------------------------------------- poll
 
+def _stamp(entry):
+    """The epoch second on an activity row, or None when it is unreadable.
+
+    One row carrying a non-numeric timestamp would otherwise raise out of a
+    `float()` deep in a comprehension and end a poller meant to run unattended
+    for weeks. Every place that reads a timestamp goes through here, so a
+    malformed row is skipped in one way rather than crashing in three.
+    """
+    if not isinstance(entry, dict):
+        return None
+    try:
+        value = float(entry.get("timestamp") or 0)
+    except (ValueError, TypeError):
+        return None
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return value
+
+
+def _replay_order(entry):
+    """Sort key placing a buy before a sell inside the same second.
+
+    `data-api/activity` exposes no sequence, log index or trade id, so rows
+    stamped to the same second carry no true order and the endpoint's own
+    ordering is newest-first. Replaying a sell before the buy it closes would
+    book a ghost exit against inventory the follower does not hold yet.
+
+    Buy-before-sell is a deliberate choice among orders none of which the data
+    can prove. It is the only one that always replays coherently: the opposite
+    reading turns an open-and-trim within one second into an exit from nothing.
+    A wallet that genuinely closed and reopened inside a second is mis-ordered
+    by this, which costs the sequencing of those two fills and nothing else.
+    """
+    return (_stamp(entry) or 0.0, 0 if str(entry.get("side") or "").upper() == "BUY" else 1)
+
+
 def activity_key(entry):
     """A stable identity for one activity row.
 
@@ -310,26 +346,35 @@ def new_activity_since(activity, cursor):
     timestamp, seen = read_cursor(cursor)
     fresh = []
     for entry in activity:
-        if not isinstance(entry, dict):
+        stamp = _stamp(entry)
+        if stamp is None:
             continue
-        stamp = float(entry.get("timestamp") or 0)
         if timestamp is None or stamp > timestamp:
             fresh.append(entry)
         elif stamp == timestamp and seen is not None and activity_key(entry) not in seen:
             fresh.append(entry)
-    fresh.sort(key=lambda entry: float(entry.get("timestamp") or 0))
+    fresh.sort(key=_replay_order)
     return fresh
 
 
-def advance_cursor(activity, newest):
-    """The cursor to store: the newest second, and what was seen inside it."""
-    return {
-        "timestamp": int(newest),
-        "keys": sorted(
-            activity_key(entry) for entry in activity
-            if isinstance(entry, dict) and float(entry.get("timestamp") or 0) == newest
-        ),
-    }
+def advance_cursor(activity, newest, previous=None):
+    """The cursor to store: the newest second, and what was seen inside it.
+
+    When the newest second has not moved, the keys already stored are kept and
+    the page's keys added to them. A page that arrives short or stale can omit
+    a fill an earlier page carried, and rebuilding the set from this page alone
+    would forget it - the next poll would then read it as new and append a
+    second record for a trade already in the log, which append-only cannot
+    withdraw.
+    """
+    keys = set()
+    stored_time, stored_keys = read_cursor(previous)
+    if stored_time == int(newest) and stored_keys:
+        keys |= stored_keys
+    for entry in activity:
+        if _stamp(entry) == newest:
+            keys.add(activity_key(entry))
+    return {"timestamp": int(newest), "keys": sorted(keys)}
 
 
 def append_records(records, path=PAPER_TRADE_LOG_FILE):
@@ -362,10 +407,7 @@ def poll_wallet(session, arm, wallet, cursor, portfolio, now=None):
     # over. `max()` would raise on the empty sequence, and nothing above this
     # catches it - one malformed page would end a poller meant to run for
     # weeks, and the log has no backfill to recover the gap with.
-    stamps = [
-        float(entry.get("timestamp") or 0)
-        for entry in activity if isinstance(entry, dict)
-    ]
+    stamps = [stamp for stamp in (_stamp(entry) for entry in activity) if stamp is not None]
     if not stamps:
         log.warning("%s %s returned a page with no readable rows", arm, wallet["address"])
         return [], cursor
@@ -399,7 +441,7 @@ def poll_wallet(session, arm, wallet, cursor, portfolio, now=None):
     previous, _seen = read_cursor(cursor)
     if previous is not None and newest < previous:
         return records, cursor
-    return records, advance_cursor(activity, newest)
+    return records, advance_cursor(activity, newest, previous=cursor)
 
 
 def poll_once(session, arms, state, profile=CURRENT_PROFILE, now=None,
