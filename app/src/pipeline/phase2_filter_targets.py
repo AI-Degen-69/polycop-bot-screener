@@ -5,10 +5,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from paths import DATA_DIR, PHASE1_FILE, PHASE2_FILE
+from paths import DATA_DIR, PHASE1_FILE, PHASE2_FILE, SCANNED_WALLETS_FILE
 
 from execution.copy_execution_profile import CURRENT_PROFILE
-from pipeline.leaderboard_adapter import to_engine_metrics
+from pipeline.first_party_adapter import first_party_activity, to_engine_metrics
 from screener.score_wallets import (
     GEM_SITE_SCORE_MAX,
     TIER_A_MIN,
@@ -16,22 +16,41 @@ from screener.score_wallets import (
     calculate_bankroll_optimized_score,
     calculate_edge_retention,
 )
-from screener.activity import compute_activity, parse_timestamp, summarize_buckets
+from screener.activity import summarize_buckets
 
-def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
+def _round_or_none(value, digits=2):
+    """A figure rounded for the record, or None when it was never measured.
+
+    `round(None, 2)` raises, so the record writer needs the same
+    absent-stays-absent discipline the engine uses (ADR 0007): a figure the
+    source could not measure is published as null, not as a rounded zero.
     """
-    Phase 2: Takes raw scraped profiles from app/data/phase1_scraped_wallets.json,
-    runs the 100-Point Audit Engine (score_wallets.py), and outputs app/data/phase2_verified_targets.json.
+    return None if value is None else round(value, digits)
+
+
+def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None,
+                      record_file=None):
+    """
+    Phase 2: scores the wallets Phase 1 discovered, from the scanner's
+    first-party measurements, into app/data/phase2_verified_targets.json.
+
+    Phase 1 supplies candidate addresses and nothing else; every figure the
+    100-point audit reads is derived from the wallet's own Polymarket fills
+    (ADR 0012). An address the scanner has not measured yet is reported as
+    pending, not rejected - the absence of a measurement is not evidence about
+    a wallet, and rejecting on it would quietly turn scan coverage into a
+    verdict.
 
     Triage is only valid for one Copy Execution Profile, so the profile is stated once
     here and passed down rather than restated as literals per call site.
 
-    The two paths default to the cached dataset and are overridable so the whole
-    phase can be exercised against a fixture, which is the only way to catch a
-    parameter that scores well because nothing ever measured it.
+    The three paths default to the cached datasets and are overridable so the
+    whole phase can be exercised against a fixture, which is the only way to
+    catch a parameter that scores well because nothing ever measured it.
     """
     in_file = in_file or os.path.join(DATA_DIR, PHASE1_FILE)
     out_file = out_file or os.path.join(DATA_DIR, PHASE2_FILE)
+    record_file = record_file or os.path.join(DATA_DIR, SCANNED_WALLETS_FILE)
 
     if not os.path.exists(in_file):
         print(f"Error: Phase 1 file {in_file} not found. Run phase1_scrape_leaderboard.py first.")
@@ -40,18 +59,25 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
     with open(in_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    raw_profiles = data.get("profiles", [])
-    print(f"=== PHASE 2: FILTERING & SCORING {len(raw_profiles)} PROFILES ===")
+    records = {}
+    if os.path.exists(record_file):
+        with open(record_file, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            records = {
+                str(key).lower(): value
+                for key, value in loaded.items() if isinstance(value, dict)
+            }
+    else:
+        print(f"Warning: no scanner record at {record_file} - nothing can be scored yet.")
 
-    # Age recency against the scrape instant, not against read time, so a
-    # cached dataset never claims a trader went quiet while it sat on disk.
-    raw_ts = data.get("timestamp")
-    scrape_now = parse_timestamp(raw_ts)
-    if raw_ts and scrape_now is None:
-        raise ValueError(f"Unparseable timestamp in Phase 1 scraped data: '{raw_ts}'")
+    raw_profiles = data.get("profiles", [])
+    print(f"=== PHASE 2: SCORING {len(raw_profiles)} DISCOVERED ADDRESSES ===")
 
     verified_targets = []
     rejected_count = 0
+    pending_count = 0
+    stale_profile_count = 0
     s_tier = []
     a_tier = []
     gems = []
@@ -61,10 +87,24 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         if not addr:
             continue
 
+        record = records.get(str(addr).lower())
+        if record is None:
+            # Never measured. Pending is not a rejection: this wallet has not
+            # been judged at all, and counting it as a reject would report scan
+            # coverage as a verdict about the trader.
+            pending_count += 1
+            continue
+        if record.get("profile_fingerprint") != profile.fingerprint:
+            # Measured under execution settings that no longer exist, so its
+            # copy replay answers a question about a different bot. Held for
+            # re-measurement rather than scored under a label it never ran with.
+            stale_profile_count += 1
+            continue
+
         # Measured before scoring, not after. Each of these is None when the
         # source data will not support it, and the engine scores None as nothing,
         # so an unmeasured wallet ranks below a measured poor one.
-        meas = to_engine_metrics(p, profile.slippage_pct)
+        meas = to_engine_metrics(record, profile.slippage_pct)
         raw_metrics = meas["raw_metrics"]
         sim_summary = meas["sim_summary"]
         green_rate = meas["green_rate"]
@@ -83,7 +123,14 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         # a wallet the screen grades A-Tier or better while the site rates it
         # poorly. The old constant 80.0 is gone so the gem definition cannot
         # silently diverge from the tier floors.
-        is_gem = raw_metrics["polycop_site_score"] < GEM_SITE_SCORE_MAX and score >= TIER_A_MIN
+        # The aggregator's opinion is the only thing Phase 1 still carries from
+        # it, kept for exactly one purpose: a Hidden Gem is defined by the two
+        # opinions disagreeing, so one of them has to be theirs. It reaches no
+        # gate and no scored parameter.
+        site_score = p.get("aggregator_opinion")
+        # An unmeasured site score cannot disagree with the screen, and Hidden Gem
+        # is defined as that disagreement.
+        is_gem = site_score is not None and site_score < GEM_SITE_SCORE_MAX and score >= TIER_A_MIN
         raw_name = p.get("name") or p.get("username")
         name_str = str(raw_name) if raw_name else f"PolyCop_Trader ({addr[:6]}...{addr[-4:]})"
 
@@ -96,24 +143,34 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
             "is_hidden_gem": is_gem,
             "simulation_summary": sim_summary,
             "metrics": {
-                "polycop_site_score": raw_metrics["polycop_site_score"],
-                "actual_pnl": round(raw_metrics["actual_pnl"], 2),
-                "copy_pnl": round(raw_metrics["copy_pnl"], 2),
-                "days_win_rate": round(green_rate, 2) if green_rate is not None else None,
+                "aggregator_opinion": site_score,
+                "actual_pnl": _round_or_none(raw_metrics["actual_pnl"]),
+                "copy_pnl": _round_or_none(raw_metrics["copy_pnl"]),
+                "days_win_rate": _round_or_none(green_rate),
                 "observed_days": observed_days,
-                "drawdown_depth": round(drawdown_depth, 4) if drawdown_depth is not None else None,
-                "edge_to_friction": round(edge_to_friction, 4) if edge_to_friction is not None else None,
-                "hedged_pct": round(raw_metrics["hedged_pct"], 2),
-                "r20_win_rate": round(raw_metrics["r20_win_rate"], 2),
-                "pl_ratio": round(raw_metrics["pl_ratio"], 2),
-                "pnl_vol_ratio": round(raw_metrics["pnl_vol_ratio"], 2),
-                "avg_invest": round(raw_metrics["avg_invest"], 2),
+                "drawdown_depth": _round_or_none(drawdown_depth, 4),
+                "edge_to_friction": _round_or_none(edge_to_friction, 4),
+                "hedged_pct": _round_or_none(raw_metrics["hedged_pct"]),
+                "pl_ratio": _round_or_none(raw_metrics["pl_ratio"]),
+                "pnl_vol_ratio": _round_or_none(raw_metrics["pnl_vol_ratio"]),
+                "avg_invest": _round_or_none(raw_metrics["avg_invest"]),
                 "markets": raw_metrics["markets"],
-                "r20_pnl": round(raw_metrics["r20_pnl"], 2),
-                "r20_slip": round(raw_metrics["r20_slip"], 2) if raw_metrics["r20_slip"] is not None else None,
-                "buy_price": round(raw_metrics["buy_price"], 4)
+                "r20_pnl": _round_or_none(raw_metrics["r20_pnl"]),
+                "r20_slip": _round_or_none(raw_metrics["r20_slip"]),
+                # How much of this wallet's history the measurement covers, so
+                # a reader can see the scope a figure was measured over rather
+                # than comparing four months against six hours.
+                "coverage_days": record.get("coverage_days"),
+                "history_truncated": record.get("history_truncated"),
+                # The share of this wallet's fills at 3c/97c extremes. It is
+                # ADR 0012's headline evidence in one number: the aggregator's
+                # top-ranked wallet bought at a median 0.999, where the most a
+                # fill can gain is 0.1%. Displayed, never gated - a wallet can
+                # have an innocent reason to trade a near-certainty.
+                "extreme_price_share": record.get("extreme_price_share"),
             },
-            "activity": compute_activity(p, now=scrape_now),
+            "annotations": meas["annotations"],
+            "activity": first_party_activity(record),
             "breakdown": audit_res["breakdown"],
             "breakdown_labels": audit_res["breakdown_labels"],
             "radar_labels": audit_res["radar_labels"],
@@ -140,6 +197,11 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         "copy_execution_profile": dict(profile.as_dict(), fingerprint=profile.fingerprint),
         "total_scraped_profiles": len(raw_profiles),
         "rejected_disqualified_count": rejected_count,
+        # Reported apart from the rejects, because these wallets were not
+        # judged. Folding them in would overstate how much the screen has
+        # actually decided.
+        "pending_measurement_count": pending_count,
+        "stale_profile_count": stale_profile_count,
         "total_verified_targets": len(verified_targets),
         "s_tier_count": len(s_tier),
         "a_tier_count": len(a_tier),
@@ -152,7 +214,9 @@ def run_phase2_filter(profile=CURRENT_PROFILE, in_file=None, out_file=None):
         json.dump(summary_data, f, indent=2)
 
     print(f"\n=== PHASE 2 COMPLETE ===")
-    print(f"Total Scraped Profiles Evaluated: {len(raw_profiles)}")
+    print(f"Total Discovered Addresses: {len(raw_profiles)}")
+    print(f"Pending First-Party Measurement: {pending_count}")
+    print(f"Measured Under An Older Profile: {stale_profile_count}")
     print(f"Disqualified Rejects: {rejected_count}")
     print(f"Verified PASS Targets: {len(verified_targets)}")
     print(f"  |-- S-Tier (>= {TIER_S_MIN:.0f} Pts): {len(s_tier)}")
