@@ -237,6 +237,22 @@ def test_a_price_outside_the_profile_bounds_is_not_copied():
     assert record["skip_reason"] == SKIP_PRICE_OUT_OF_BOUNDS
 
 
+def test_a_refused_entry_still_counts_toward_the_target_holding():
+    """The follower does not mirror a trade priced outside the bounds, but the
+    target still made it. Exits are sized against the target's holding, so not
+    counting those shares would turn a later partial trim into a full exit."""
+    portfolio = _portfolio()
+    # 100 shares the follower mirrors, then 100 more it refuses on price.
+    _record(_trade(usdc_size=50.0, shares=100.0), portfolio)
+    _record(_trade(price=0.99, usdc_size=99.0, shares=100.0), portfolio)
+    entry_shares = portfolio.position(ASSET).follower_shares
+
+    # The target sells half of its real 200-share holding.
+    record = _record(_trade(side="SELL", price=0.49, shares=100.0), portfolio)
+    assert record["sizing"]["exit_fraction"] == 0.5
+    assert abs(record["fill"]["shares"] - entry_shares / 2) < 1e-6
+
+
 def test_a_missing_book_leaves_the_trade_unpriced_rather_than_guessed():
     record = _record(_trade(), _portfolio(), book=None)
     assert record["skip_reason"] == SKIP_NO_BOOK

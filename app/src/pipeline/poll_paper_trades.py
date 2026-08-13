@@ -265,19 +265,71 @@ def _arm_state(state, arm, profile):
 
 # -------------------------------------------------------------------- poll
 
+def activity_key(entry):
+    """A stable identity for one activity row.
+
+    The transaction hash alone is not enough: one transaction can carry several
+    fills, so the leg is included. This is what lets two trades stamped to the
+    same second be told apart.
+    """
+    return "|".join(str(entry.get(field) or "") for field in
+                    ("transactionHash", "asset", "side", "size"))
+
+
+def read_cursor(stored):
+    """A wallet's cursor as `(timestamp, seen_keys)`.
+
+    `seen_keys` is None for the bare timestamp earlier runs wrote: that run
+    recorded no keys, so which rows inside its final second were already logged
+    is unknown, and the whole second has to count as consumed. Admitting them
+    on the assumption they were missed would duplicate every one that was not,
+    and an append-only log cannot withdraw a duplicate. The cost is at most the
+    few trades sharing that one second, once, on the first poll after upgrade.
+    """
+    if stored is None:
+        return None, set()
+    if isinstance(stored, dict):
+        return stored.get("timestamp"), set(stored.get("keys") or ())
+    return stored, None
+
+
 def new_activity_since(activity, cursor):
     """A wallet's unseen trades, oldest first.
 
     The endpoint answers newest-first, but the log is replayed forward: a sell
     must be recorded after the buy it closes, or the portfolio would book an
     exit from a position it does not yet hold.
+
+    Ties are why this is not a simple `> cursor`. Polymarket stamps activity to
+    the second, and a wallet filling several times within one second is
+    ordinary - the busiest of them trade thousands of times a day. Advancing
+    past the whole second would drop every fill after the first one in it,
+    silently and permanently: the log is append-only and has no backfill, so a
+    trade missed here is missed for good.
     """
-    fresh = [
-        entry for entry in activity
-        if isinstance(entry, dict) and float(entry.get("timestamp") or 0) > cursor
-    ]
+    timestamp, seen = read_cursor(cursor)
+    fresh = []
+    for entry in activity:
+        if not isinstance(entry, dict):
+            continue
+        stamp = float(entry.get("timestamp") or 0)
+        if timestamp is None or stamp > timestamp:
+            fresh.append(entry)
+        elif stamp == timestamp and seen is not None and activity_key(entry) not in seen:
+            fresh.append(entry)
     fresh.sort(key=lambda entry: float(entry.get("timestamp") or 0))
     return fresh
+
+
+def advance_cursor(activity, newest):
+    """The cursor to store: the newest second, and what was seen inside it."""
+    return {
+        "timestamp": int(newest),
+        "keys": sorted(
+            activity_key(entry) for entry in activity
+            if isinstance(entry, dict) and float(entry.get("timestamp") or 0) == newest
+        ),
+    }
 
 
 def append_records(records, path=PAPER_TRADE_LOG_FILE):
@@ -320,7 +372,7 @@ def poll_wallet(session, arm, wallet, cursor, portfolio, now=None):
 
     newest = int(max(stamps))
     if cursor is None:
-        return [], newest
+        return [], advance_cursor(activity, newest)
 
     fresh = new_activity_since(activity, cursor)
     if len(fresh) >= ACTIVITY_PAGE:
@@ -341,7 +393,13 @@ def poll_wallet(session, arm, wallet, cursor, portfolio, now=None):
         record["copy_latency_seconds"] = max(0, now - record["target"]["timestamp"])
         records.append(record)
 
-    return records, max(newest, cursor)
+    # Never move the cursor backwards: a page that arrives short or stale must
+    # not re-open trades already logged, because the log is append-only and a
+    # duplicate cannot be withdrawn.
+    previous, _seen = read_cursor(cursor)
+    if previous is not None and newest < previous:
+        return records, cursor
+    return records, advance_cursor(activity, newest)
 
 
 def poll_once(session, arms, state, profile=CURRENT_PROFILE, now=None,

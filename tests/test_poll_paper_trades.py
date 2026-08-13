@@ -22,6 +22,8 @@ from execution.paper_trade_log import PaperPortfolio  # noqa: E402
 from pipeline.poll_paper_trades import (  # noqa: E402
     HUMAN_ALPHA_ARM,
     PHASE3_ARM,
+    activity_key,
+    advance_cursor,
     check_profile_fingerprint,
     load_human_alpha_wallets,
     load_phase3_wallets,
@@ -29,6 +31,7 @@ from pipeline.poll_paper_trades import (  # noqa: E402
     new_activity_since,
     poll_once,
     poll_wallet,
+    read_cursor,
     save_state,
 )
 
@@ -68,10 +71,11 @@ class FakeSession:
         return self
 
 
-def _trade(timestamp, side="BUY", price=0.5, shares=100.0, usdc_size=50.0, asset=ASSET):
+def _trade(timestamp, side="BUY", price=0.5, shares=100.0, usdc_size=50.0, asset=ASSET,
+           tx=None):
     return {
         "timestamp": timestamp,
-        "transactionHash": f"0x{timestamp}",
+        "transactionHash": tx or f"0x{timestamp}",
         "conditionId": "0xcondition",
         "asset": asset,
         "title": "Test market",
@@ -110,15 +114,56 @@ def test_the_first_sighting_of_a_wallet_records_nothing():
     records, cursor = poll_wallet(session, HUMAN_ALPHA_ARM, WALLET, None,
                                   _portfolio(), now=2000)
     assert records == []
-    assert cursor == 1000
+    assert cursor["timestamp"] == 1000
+    # The rows inside that second are remembered, so the next poll can tell a
+    # genuinely new fill in the same second from one already accounted for.
+    assert cursor["keys"] == [activity_key(_trade(1000))]
 
 
 def test_only_trades_newer_than_the_cursor_are_recorded():
     session = FakeSession([[_trade(1200), _trade(1100), _trade(1000)]])
-    records, cursor = poll_wallet(session, HUMAN_ALPHA_ARM, WALLET, 1000,
+    cursor_in = advance_cursor([_trade(1000)], 1000)
+    records, cursor = poll_wallet(session, HUMAN_ALPHA_ARM, WALLET, cursor_in,
                                   _portfolio(), now=2000)
     assert [record["target"]["timestamp"] for record in records] == [1100, 1200]
-    assert cursor == 1200
+    assert cursor["timestamp"] == 1200
+
+
+def test_a_second_fill_in_the_same_second_is_not_lost():
+    """Polymarket stamps activity to the second, and the wallets followed here
+    fill thousands of times a day. A cursor that advanced past the whole second
+    would drop every fill after the first one in it - permanently, because the
+    log is append-only and has no backfill."""
+    first = _trade(1000, tx="0xaaa")
+    second = _trade(1000, tx="0xbbb", shares=50.0, usdc_size=40.0)
+    cursor = advance_cursor([first], 1000)
+
+    fresh = new_activity_since([second, first], cursor)
+    assert [entry["transactionHash"] for entry in fresh] == ["0xbbb"]
+
+
+def test_a_fill_already_logged_in_that_second_is_not_recorded_twice():
+    first = _trade(1000, tx="0xaaa")
+    cursor = advance_cursor([first], 1000)
+    assert new_activity_since([first], cursor) == []
+
+
+def test_two_fills_in_one_transaction_are_told_apart():
+    """One transaction can carry several fills, so the hash alone is not an
+    identity."""
+    buy = _trade(1000, tx="0xsame", side="BUY")
+    sell = _trade(1000, tx="0xsame", side="SELL")
+    assert activity_key(buy) != activity_key(sell)
+
+
+def test_a_cursor_written_before_ties_were_handled_still_reads():
+    """The poller runs unattended for weeks, so an upgrade meets a state file
+    already on disk. Its second counts as consumed: which rows inside it were
+    logged is unknown, and admitting them would duplicate the ones that were."""
+    timestamp, seen = read_cursor(1000)
+    assert timestamp == 1000
+    assert seen is None
+    assert new_activity_since([_trade(1000)], 1000) == []
 
 
 def test_trades_are_replayed_oldest_first():

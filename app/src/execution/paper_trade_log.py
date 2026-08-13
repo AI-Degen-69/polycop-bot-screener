@@ -372,6 +372,15 @@ def record_target_trade(arm: str, wallet: Dict[str, Any], activity: Dict[str, An
         return skip(SKIP_NOT_A_TRADE)
 
     if not (profile.min_price <= target["price"] <= profile.max_price):
+        # The follower does not mirror this trade, but the target still made
+        # it, and the exit leg is sized against the target's holding. Skipping
+        # without counting the shares would leave `exit_fraction` dividing by a
+        # position smaller than the one the target actually holds, turning a
+        # later partial trim into a full exit.
+        if side == "BUY":
+            position.target_shares += target["shares"]
+        else:
+            position.target_shares = max(0.0, position.target_shares - target["shares"])
         return skip(SKIP_PRICE_OUT_OF_BOUNDS)
 
     levels = _levels(book, side)
